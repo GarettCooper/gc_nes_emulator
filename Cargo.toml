@@ -1,0 +1,12 @@
+[package]
+name = "gc_nes_emulator"
+version = "0.1.0"
+authors = ["Garett Cooper <garettcooper@ymail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "*"
+emulator_6502 = "0.1.0"
+minifb = "0.13.0"
