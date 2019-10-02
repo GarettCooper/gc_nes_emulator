@@ -1,11 +1,7 @@
-pub (super) struct NesApu{
+pub(super) struct NesApu {}
 
-}
-
-impl NesApu{
-    pub fn new() -> Self{
-        NesApu{
-
-        }
+impl NesApu {
+    pub fn new() -> Self {
+        NesApu {}
     }
 }
