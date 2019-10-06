@@ -1,13 +1,16 @@
 [package]
 name = "gc_nes_emulator"
 version = "0.1.0"
-authors = ["Garett Cooper <coopergarettm@gmail.com>"]
+authors = ["Garett Cooper"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 log = "*"
+env_logger = "0.7.0"
 emulator_6502 = "0.1.0"
 minifb = "0.13.0"
-bitflags = "1.0"
+bitflags = "1.2.0"
+simple-error = "0.2.1"
+structopt = "0.3" # Replace with clap when 3.0.0 comes out of beta
