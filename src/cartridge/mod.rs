@@ -14,13 +14,13 @@ const PROGRAM_ROM_BANK_SIZE: usize = 16 * 1024; // 16 KiB
 const CHARACTER_ROM_BANK_SIZE: usize = 8 * 1024; // 8 KiB
 
 /// Loads a cartridge from a file
-pub(crate) fn load_cartridge_from_file(file_path: &Path) -> Result<Cartridge, Box<dyn Error>> {
+pub fn load_cartridge_from_file(file_path: &Path) -> Result<Cartridge, Box<dyn Error>> {
     info!("Opening file: {}", file_path.to_str().unwrap());
     return load_cartridge_from_reader(&mut BufReader::new(File::open(file_path)?));
 }
 
 /// Loads a cartridge from a reader and returns
-pub(crate) fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartridge, Box<dyn Error>> {
+pub fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartridge, Box<dyn Error>> {
     //let mut buf_reader = game_file;
     let mut header: [u8; 16] = [0; 16];
     buf_reader.read_exact(&mut header)?;
@@ -50,7 +50,9 @@ pub(crate) fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<
             mapper,
             trainer_data: Box::new([0; 512]),
             program_rom: vec![0; program_rom_size].into_boxed_slice(),
+            program_ram: Box::new([]), //Empty initialization until I implement this
             character_rom: vec![0; character_rom_size].into_boxed_slice(),
+            character_ram: Box::new([]),
         };
 
         if HeaderFlags6::from_bits_truncate(header[6]).contains(HeaderFlags6::TRAINER_PRESENT) {
@@ -88,22 +90,34 @@ fn calculate_rom_size(least_significant_byte: u8, most_significant_byte: u8, ban
     }
 }
 
-pub(crate) struct Cartridge {
+pub struct Cartridge {
     mapper: Box<dyn Mapper>,
     trainer_data: Box<[u8; 512]>,
     program_rom: Box<[u8]>,
+    program_ram: Box<[u8]>,
     character_rom: Box<[u8]>,
+    character_ram: Box<[u8]>,
 }
 
 impl Cartridge {
-    /// Read from the cartridge's program ROM through the catridge's mapper
-    fn program_rom_read(&self, address: u16) -> u8 {
-        self.mapper.program_rom_read(&self.program_rom, address)
+    /// Read from the cartridge's program ROM/RAM through the cartridge's mapper
+    pub(crate) fn program_read(&self, address: u16) -> u8 {
+        self.mapper.program_read(&self.program_rom, &self.program_ram, address)
     }
 
-    /// Read from the cartridge's character ROM through the cartridge's mapper
-    fn character_rom_read(&self, address: u16) -> u8 {
-        self.mapper.character_rom_read(&self.character_rom, address)
+    /// Read from the cartridge's character ROM/RAM through the cartridge's mapper
+    pub(crate) fn character_read(&self, address: u16) -> u8 {
+        self.mapper.character_read(&self.character_rom, &self.character_ram, address)
+    }
+
+    /// Write to the cartridge's program RAM through the cartridge's mapper
+    pub(crate) fn program_write(&mut self, address: u16, data: u8) {
+        self.mapper.program_write(&mut self.program_ram, address, data)
+    }
+
+    /// Write to the cartridge's program RAM through the cartridge's mapper
+    pub(crate) fn character_write(&mut self, address: u16, data: u8) {
+        self.mapper.character_write(&mut self.character_ram, address, data)
     }
 }
 

@@ -9,19 +9,31 @@ pub(super) fn get_mapper(mapper_id: u16, submapper_id: u8) -> Result<Box<dyn Map
     }
 }
 
+/// The circuit in the cartridge that is reponsible for mapping the addresses provided by the cpu to the onboard memory.
+/// ROM only for now.
 pub(super) trait Mapper {
-    fn program_rom_read(&self, program_rom: &[u8], address: u16) -> u8;
-    fn character_rom_read(&self, character_rom: &[u8], address: u16) -> u8;
+    fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8;
+    fn character_read(&self, character_rom: &[u8], character_ram: &[u8], address: u16) -> u8;
+    fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8);
+    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8);
 }
 
 pub(super) struct Mapper000 {}
 
 impl Mapper for Mapper000 {
-    fn program_rom_read(&self, program_rom: &[u8], address: u16) -> u8 {
-        unimplemented!()
+    fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
+        unimplemented!();
     }
 
-    fn character_rom_read(&self, character_rom: &[u8], address: u16) -> u8 {
-        unimplemented!()
+    fn character_read(&self, character_rom: &[u8], character_ram: &[u8], address: u16) -> u8 {
+        unimplemented!();
+    }
+
+    fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
+        unimplemented!();
+    }
+
+    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
+        unimplemented!();
     }
 }
