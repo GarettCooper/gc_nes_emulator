@@ -1,19 +1,12 @@
-#![allow(clippy::needless_return)] // I prefer clarity of return
-
-#[macro_use]
-extern crate bitflags;
-#[macro_use]
-extern crate simple_error;
-#[macro_use]
 extern crate structopt;
-#[macro_use]
-extern crate log;
-
-mod cartridge;
-mod nes;
 
 use crate::structopt::StructOpt;
+use gc_nes_emulator::cartridge::load_cartridge_from_file;
+use gc_nes_emulator::nes::Nes;
 use std::path::Path;
+
+#[macro_use]
+extern crate log;
 
 fn main() {
     let arguments = Arguments::from_args();
@@ -22,11 +15,12 @@ fn main() {
     env_logger::init();
 
     info!("Starting {} by {}, version {}...", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_AUTHORS"), env!("CARGO_PKG_VERSION"));
-    let result = cartridge::load_cartridge_from_file(Path::new(&arguments.file)).expect("msg: &str");
+    let cartridge = load_cartridge_from_file(Path::new(&arguments.file)).expect("File read error"); // TODO: Present a message to the user instead of crashing
+    let nes = Nes::new(cartridge);
 }
 
 #[derive(StructOpt, Debug)]
-struct Arguments {
+pub struct Arguments {
     #[structopt(short = "f", long = "file")]
     file: String,
 }
