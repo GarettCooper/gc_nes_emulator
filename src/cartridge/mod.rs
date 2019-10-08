@@ -51,8 +51,7 @@ pub fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartrid
             trainer_data: Box::new([0; 512]),
             program_rom: vec![0; program_rom_size].into_boxed_slice(),
             program_ram: Box::new([]), //Empty initialization until I implement this
-            character_rom: vec![0; character_rom_size].into_boxed_slice(),
-            character_ram: Box::new([]),
+            character_ram: vec![0; character_rom_size].into_boxed_slice(),
         };
 
         if HeaderFlags6::from_bits_truncate(header[6]).contains(HeaderFlags6::TRAINER_PRESENT) {
@@ -61,7 +60,7 @@ pub fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartrid
         }
 
         buf_reader.read_exact(cartridge.program_rom.as_mut())?;
-        buf_reader.read_exact(cartridge.character_rom.as_mut())?;
+        buf_reader.read_exact(cartridge.character_ram.as_mut())?;
 
         info!("File loaded successfully");
         return Ok(cartridge);
@@ -95,7 +94,7 @@ pub struct Cartridge {
     trainer_data: Box<[u8; 512]>,
     program_rom: Box<[u8]>,
     program_ram: Box<[u8]>,
-    character_rom: Box<[u8]>,
+    // All character memory is treated as ram as games that only have ROM will not attempt to write to it
     character_ram: Box<[u8]>,
 }
 
@@ -107,7 +106,7 @@ impl Cartridge {
 
     /// Read from the cartridge's character ROM/RAM through the cartridge's mapper
     pub(crate) fn character_read(&self, address: u16) -> u8 {
-        self.mapper.character_read(&self.character_rom, &self.character_ram, address)
+        self.mapper.character_read(&self.character_ram, address)
     }
 
     /// Write to the cartridge's program RAM through the cartridge's mapper
