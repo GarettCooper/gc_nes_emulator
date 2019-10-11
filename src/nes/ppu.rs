@@ -1,5 +1,7 @@
 use crate::cartridge::Cartridge;
 
+pub const NES_SCREEN_DIMENSIONS: usize = 256 * 240;
+
 pub(super) struct NesPpu {
     ctrl_flags: PpuCtrl,
     mask_flags: PpuMask,
@@ -16,6 +18,8 @@ pub(super) struct NesPpu {
     ppu_data_buffer: u8,
     /// Stores 4 bits of information about up to 64 sprites
     object_attribute_memory: Box<[u8; u8::max_value() as usize + 1]>,
+    /// The current state of the screen
+    screen_buffer: Box<[u32; NES_SCREEN_DIMENSIONS]>,
 }
 
 impl NesPpu {
@@ -33,6 +37,7 @@ impl NesPpu {
             ppu_address_latch: false,
             ppu_data_buffer: 0x00,
             object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
+            screen_buffer: Box::new([0; NES_SCREEN_DIMENSIONS]),
         }
     }
 
