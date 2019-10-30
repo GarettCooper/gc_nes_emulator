@@ -41,7 +41,7 @@ impl NesPpu {
         }
     }
 
-    /// Runs a single PPU cycle, which draws a single dot into the frame buffer
+    /// Runs a single PPU cycle, which draws a single pixel into the frame buffer
     pub fn cycle(&mut self, cartridge: &Cartridge) {
         unimplemented!();
     }
@@ -98,6 +98,10 @@ impl NesPpu {
     fn oam_write(&mut self, data: u8) {
         self.object_attribute_memory[self.oam_address as usize] = data;
         self.oam_address += 1; // Writing to the oam address increments it
+    }
+
+    pub(super) fn oam_dma_write(&mut self, address: u8, data: u8) {
+        self.object_attribute_memory[self.oam_address.wrapping_add(address) as usize] = data;
     }
 
     fn scroll_write(&mut self, data: u8) {
