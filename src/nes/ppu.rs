@@ -1,6 +1,9 @@
 use crate::cartridge::Cartridge;
 
-pub const NES_SCREEN_DIMENSIONS: usize = 256 * 240;
+/// The total number of scanlines in a frame
+const MAX_SCANLINES: u16 = 261;
+/// The total number of cycles in a scanline
+const MAX_CYCLES: u16 = 340;
 
 pub(super) struct NesPpu {
     ctrl_flags: PpuCtrl,
@@ -19,7 +22,11 @@ pub(super) struct NesPpu {
     /// Stores 4 bits of information about up to 64 sprites
     object_attribute_memory: Box<[u8; u8::max_value() as usize + 1]>,
     /// The current state of the screen
-    screen_buffer: Box<[u32; NES_SCREEN_DIMENSIONS]>,
+    screen_buffer: Box<[u32; super::NES_SCREEN_DIMENSIONS]>,
+    /// The scanline (-1 to 261) of the screen that is currently being drawn
+    scanline: u16,
+    /// The cycle (0 to 340) of the current scanline
+    cycle: u16
 }
 
 impl NesPpu {
@@ -37,12 +44,40 @@ impl NesPpu {
             ppu_address_latch: false,
             ppu_data_buffer: 0x00,
             object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
-            screen_buffer: Box::new([0; NES_SCREEN_DIMENSIONS]),
+            screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
+            scanline: 261,
+            cycle: 0
         }
     }
 
     /// Runs a single PPU cycle, which draws a single pixel into the frame buffer
     pub fn cycle(&mut self, cartridge: &Cartridge) {
+
+        let sprite_colour: u8 = 0x01;
+        let background_colour: u8 = 0x02;
+        let sprite_priority: bool = true;
+
+        match self.scanline {
+            MAX_SCANLINES | 0..=239 => {},
+            240 => {}, // Nothing happens on the first scanline off the screen
+            241 => {
+                if self.cycle == 1 { // The vertical blank flag is set on the second cycle of scanline 241
+                    self.status_flags.set(PpuStatus::VERTICAL_BLANK, true);
+                }
+            },
+            242..=260 => {}, // Nothing continues to happen so that CPU can manipulate PPU freely
+            _ => panic!("Invalid Scanline: {}", self.scanline) // Consider unreachable!()
+        }
+
+        let l = match (sprite_colour, background_colour, sprite_priority) {
+            (0x00, 0x00, _) => background_colour, //BG0x3f00?
+            (0x00, 0x01..=0x03, _) => sprite_colour,
+            (0x01..=0x03, 0x00, _) => background_colour,
+            (0x01..=0x03, 0x01..=0x03, true) => sprite_colour,
+            (0x01..=0x03, 0x01..=0x03, false) => background_colour,
+            _ => panic!("Invalid colour values") // Consider unreachable!()
+        };
+
         unimplemented!();
     }
 
@@ -83,7 +118,7 @@ impl NesPpu {
             0x0005 => self.scroll_write(data),
             0x0006 => self.ppu_address_write(data),
             0x0007 => self.vram_write(data),
-            _ => panic!("Invalid PPU Write Address"), //This should never happen since its handled on a higher level
+            _ => warn!("Invalid PPU Write Address"), //This should never happen since its handled on a higher level
         }
     }
 
@@ -125,6 +160,10 @@ impl NesPpu {
 
     fn vram_write(&mut self, data: u8) {
         unimplemented!()
+    }
+
+    pub fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS]{
+        &self.screen_buffer
     }
 }
 

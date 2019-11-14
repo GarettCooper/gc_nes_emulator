@@ -8,6 +8,9 @@ use emulator_6502::{Interface6502, MOS6502};
 mod apu;
 mod ppu;
 
+/// The dimensions of NES screen in pixels
+pub const NES_SCREEN_DIMENSIONS: usize = 256 * 240;
+
 ///
 pub struct Nes {
     // NES Components-----------------------------------------------------------------------------------------------------------------
@@ -95,6 +98,11 @@ impl Nes {
         self.cycle_count += 1;
     }
 
+    /// Gets the current state of the screen from the PPU's screen buffer
+    pub fn get_screen(&mut self) -> &[u32; NES_SCREEN_DIMENSIONS]{
+        self.bus.ppu.get_screen()
+    }
+
     /// Resets the state of the console
     pub fn reset(&mut self) {
         self.cpu.reset(&mut self.bus);
@@ -138,12 +146,13 @@ impl Interface6502 for Bus {
 }
 
 impl DmaStatus{
-
-    fn new(page: u8) -> Self{
-        DmaStatus{ dma_wait: true, 
-        dma_start_address: (page as u16) << 8,
-        dma_count: 0,
-        dma_buffer:0 }
+    /// Create a new DmaStatus instance
+    fn new(page: u8) -> Self {
+        DmaStatus { 
+            dma_wait: true, 
+            dma_start_address: (page as u16) << 8,
+            dma_count: 0,
+            dma_buffer:0
+        }
     }
-
 }
