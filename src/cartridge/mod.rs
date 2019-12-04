@@ -7,67 +7,12 @@ use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
 
-//Header constants
-const IDENTIFICATION_STRING: &str = "NES\u{001a}";
+// Header constants
+/// Byte array equivalent to the string "NES\u{001a}", used for testing if the file format is valid
+const IDENTIFICATION_STRING: [u8; 4] = [0x4e, 0x45, 0x53, 0x1a];
 
 const PROGRAM_ROM_BANK_SIZE: usize = 16 * 1024; // 16 KiB
 const CHARACTER_ROM_BANK_SIZE: usize = 8 * 1024; // 8 KiB
-
-/// Loads a cartridge from a file
-pub fn load_cartridge_from_file(file_path: &Path) -> Result<Cartridge, Box<dyn Error>> {
-    info!("Opening file: {}", file_path.to_str().unwrap());
-    return load_cartridge_from_reader(&mut BufReader::new(File::open(file_path)?));
-}
-
-/// Loads a cartridge from a reader and returns
-pub fn load_cartridge_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartridge, Box<dyn Error>> {
-    //let mut buf_reader = game_file;
-    let mut header: [u8; 16] = [0; 16];
-    buf_reader.read_exact(&mut header)?;
-
-    // Test file format
-    if String::from_utf8(header[..IDENTIFICATION_STRING.len()].to_vec())? == IDENTIFICATION_STRING {
-        let nes20: bool = HeaderFlags7::from_bits_truncate(header[7]).contains(HeaderFlags7::NES_20_IDENTIFIER); // Check if file is NES 2.0
-        if nes20 {
-            debug!("File is in NES 2.0 format");
-        } else {
-            debug!("File is in iNes format");
-        }
-
-        // Get a mapper based on the four mapper identification fragments in the 6th, 7th, and 8th bytes of the header, along with a submapper
-        let mapper = mapper::get_mapper(
-            u16::from(header[8] & 0x0f) << 8 | u16::from(header[7] & HeaderFlags7::MAPPER_HI.bits) | u16::from(header[6] & HeaderFlags6::MAPPER_LO.bits) >> 4,
-            (header[8] & 0xf0) >> 4,
-        )?;
-
-        let program_rom_size = calculate_rom_size(header[4], header[9] & 0x0f, PROGRAM_ROM_BANK_SIZE, nes20)?;
-        debug!("Allocating {} bytes for program ROM", program_rom_size);
-
-        let character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes20)?;
-        debug!("Allocating {} bytes for character ROM", character_rom_size);
-
-        let mut cartridge = Cartridge {
-            mapper,
-            trainer_data: Box::new([0; 512]),
-            program_rom: vec![0; program_rom_size].into_boxed_slice(),
-            program_ram: Box::new([]), //Empty initialization until I implement this
-            character_ram: vec![0; character_rom_size].into_boxed_slice(),
-        };
-
-        if HeaderFlags6::from_bits_truncate(header[6]).contains(HeaderFlags6::TRAINER_PRESENT) {
-            debug!("Trainer is present");
-            buf_reader.read_exact(cartridge.trainer_data.as_mut())?;
-        }
-
-        buf_reader.read_exact(cartridge.program_rom.as_mut())?;
-        buf_reader.read_exact(cartridge.character_ram.as_mut())?;
-
-        info!("File loaded successfully");
-        return Ok(cartridge);
-    } else {
-        bail!("File format is invalid!");
-    }
-}
 
 /// Returns the number of bytes of program rom for NES 2.0 or iNes format as a usize
 /// Broken into its own function for ease of unit testing
@@ -89,6 +34,7 @@ fn calculate_rom_size(least_significant_byte: u8, most_significant_byte: u8, ban
     }
 }
 
+/// Type representing a Cartridge that can be loaded by the emulator, created by the
 pub struct Cartridge {
     mapper: Box<dyn Mapper>,
     trainer_data: Box<[u8; 512]>,
@@ -118,6 +64,62 @@ impl Cartridge {
     pub(crate) fn character_write(&mut self, address: u16, data: u8) {
         self.mapper.character_write(&mut self.character_ram, address, data)
     }
+
+    /// Loads a cartridge from a file
+    pub fn load_from_file(file_path: &Path) -> Result<Cartridge, Box<dyn Error>> {
+        info!("Opening file: {}", file_path.to_str().unwrap());
+        return Cartridge::load_from_reader(&mut BufReader::new(File::open(file_path)?));
+    }
+
+    /// Loads a cartridge from a reader and returns
+    pub fn load_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartridge, Box<dyn Error>> {
+        //let mut buf_reader = game_file;
+        let mut header: [u8; 16] = [0; 16];
+        buf_reader.read_exact(&mut header)?;
+
+        // Test file format
+        if header[..IDENTIFICATION_STRING.len()] == IDENTIFICATION_STRING {
+            let nes2: bool = HeaderFlags7::from_bits_truncate(header[7]).contains(HeaderFlags7::NES_2_IDENTIFIER); // Check if file is NES 2.0
+            if nes2 {
+                debug!("File is in NES 2.0 format");
+            } else {
+                debug!("File is in iNes format");
+            }
+
+            // Get a mapper based on the four mapper identification fragments in the 6th, 7th, and 8th bytes of the header, along with a submapper
+            let mapper = mapper::get_mapper(
+                u16::from(header[8] & 0x0f) << 8 | u16::from(header[7] & HeaderFlags7::MAPPER_HI.bits) | u16::from(header[6] & HeaderFlags6::MAPPER_LO.bits) >> 4,
+                (header[8] & 0xf0) >> 4,
+            )?;
+
+            let program_rom_size = calculate_rom_size(header[4], header[9] & 0x0f, PROGRAM_ROM_BANK_SIZE, nes2)?;
+            debug!("Allocating {} bytes for program ROM", program_rom_size);
+
+            let character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes2)?;
+            debug!("Allocating {} bytes for character ROM", character_rom_size);
+
+            let mut cartridge = Cartridge {
+                mapper,
+                trainer_data: Box::new([0; 512]),
+                program_rom: vec![0; program_rom_size].into_boxed_slice(),
+                program_ram: Box::new([]), //Empty initialization until I implement this
+                character_ram: vec![0; character_rom_size].into_boxed_slice(),
+            };
+
+            if HeaderFlags6::from_bits_truncate(header[6]).contains(HeaderFlags6::TRAINER_PRESENT) {
+                debug!("Trainer is present");
+                buf_reader.read_exact(cartridge.trainer_data.as_mut())?;
+            }
+
+            buf_reader.read_exact(cartridge.program_rom.as_mut())?;
+            buf_reader.read_exact(cartridge.character_ram.as_mut())?;
+
+            info!("File loaded successfully");
+            return Ok(cartridge);
+        } else {
+            bail!("File format is invalid!");
+        }
+    }
 }
 
 bitflags! {
@@ -135,7 +137,7 @@ bitflags! {
     #[derive(Default)]
     struct HeaderFlags7: u8 {
         const CONSOLE_TYPE = 0b0000_0011;
-        const NES_20_IDENTIFIER = 0b0000_1100;
+        const NES_2_IDENTIFIER = 0b0000_1100;
         const MAPPER_HI = 0b1111_0000;
     }
 }
