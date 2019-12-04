@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 log = "*"
 env_logger = "0.7.0"
-emulator_6502 = "0.1.0"
+emulator_6502 = "0.*"
 minifb = "0.13.0"
 bitflags = "1.2.0"
 simple-error = "0.2.1"
