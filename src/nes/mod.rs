@@ -136,7 +136,7 @@ impl Interface6502 for Bus {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff] = data,     // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.write(&mut self.cartridge, address, data), // Mirroring will be done by the ppu
             0x4000..=0x4013 => unimplemented!(),                                   // self.apu.write(address, data)
-            0x4014 => self.dma_status = Some(DmaStatus::new(data)),                // Begins the OAM DMA operation at the data page
+            0x4014 => self.dma_status = Some(DmaStatus::new(data)),          // Begins the OAM DMA operation at the data page
             0x4015 => unimplemented!(),
             0x4016..=0x4017 => unimplemented!(),                                   // self.input.write(address, data)
             0x4018..=0x401f => unimplemented!(),                                   // Usually disabled on the nes
@@ -148,11 +148,26 @@ impl Interface6502 for Bus {
 impl DmaStatus{
     /// Create a new DmaStatus instance
     fn new(page: u8) -> Self {
-        DmaStatus { 
-            dma_wait: true, 
+        DmaStatus {
+            dma_wait: true,
             dma_start_address: (page as u16) << 8,
             dma_count: 0,
-            dma_buffer:0
+            dma_buffer: 0,
         }
     }
 }
+
+/// Interface Trait for NES Input Devices
+pub trait NesInputDevice {
+    /// The lower three bits of the data byte will be held and control input device behaviour.
+    /// On a standard NES controller, this will load the shift registers so that they can be polled
+    fn latch(&mut self, latch: u8);
+    /// Polls a single bit from the controller
+    /// On a standard NES controller, this will return the next bit in the controller's shift register.
+    ///
+    /// The bus parameter is used for simulating open bus behaviour. It should be |ed with the three
+    /// bits that were polled.
+    fn poll(&mut self, bus: u8) -> u8;
+}
+
+// TODO: Write DMA tests
