@@ -36,7 +36,7 @@ impl NesInputDevice for NesController {
         // Set the bits in the shift register to match the appropriate buttons
         // TODO: Make these re-bindable
         self.shift_register =
-            (self.window.is_key_down(Key::Space) as u8) << 0 |   // A
+            (self.window.is_key_down(Key::Space) as u8) << 0 |       // A
                 (self.window.is_key_down(Key::Shift) as u8) << 1 |   // B
                 (self.window.is_key_down(Key::Enter) as u8) << 2 |   // Select
                 (self.window.is_key_down(Key::Escape) as u8) << 3 |  // Start
@@ -49,7 +49,10 @@ impl NesInputDevice for NesController {
     fn poll(&mut self, bus: u8) -> u8 {
         // Select only the last bit of the
         let result = self.shift_register & 0x01;
+        // Get the next bit in the shift register
         self.shift_register >>= 1;
+        // Set the new bit to 1, which is returned after 8 polls on official NES controllers
+        self.shift_register |= 0x80;
         // Return the result bit with the top 5 bits as the previous byte on the bus
         return result | (bus & 0xf4);
     }
