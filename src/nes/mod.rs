@@ -80,16 +80,23 @@ impl<'a> Nes<'a> {
         if self.cycle_count % 3 == 0 {
             //Copy the dma_status so that the bus is not decomposed which would prevent calling methods on it in the match statement
             let mut dma_status = self.bus.dma_status;
+            // This was created as a personal exercise in pattern matching, but isn't very readable.
+            // I should consider alternatives.
             match (self.cycle_count, &mut dma_status) {
-                (_, None) => self.cpu.cycle(&mut self.bus), // CPU cycles every third ppu dot when DMA is not running
-                // Patterns where DMA is enabled
-                (c, Some(DmaStatus {dma_wait: wait @ true,..})) if c % 2 == 1 => *wait = false, // DMA can only start on an even clock cycle
-                (_, Some(DmaStatus {dma_wait: true,..})) => (), // DMA must wait an clock cycle for reads to be resolved
-                (c, Some(DmaStatus {dma_wait: false, dma_start_address, dma_count, dma_buffer })) if c % 2 == 0 => {
+                // DMA disabled, CPU cycles every third ppu dot
+                (_, None) => self.cpu.cycle(&mut self.bus),
+                // DMA ENABLED ------------------------------------------------------------------------------------------------------------
+                // DMA can only start on an even clock cycle
+                (c, Some(DmaStatus { dma_wait: wait @ true, .. })) if c % 2 == 1 => *wait = false,
+                // DMA must wait a clock cycle for reads to be resolved
+                (_, Some(DmaStatus { dma_wait: true, .. })) => (),
+                // DMA reads from memory on even clock cycles
+                (c, Some(DmaStatus { dma_wait: false, dma_start_address, dma_count, dma_buffer })) if c % 2 == 0 => {
                     *dma_buffer = self.bus.read(*dma_start_address + *dma_count as u16);
                     *dma_count = dma_count.wrapping_add(1);
                 }
-                (_, Some(DmaStatus {dma_wait: false, dma_count, dma_buffer,..})) => {
+                // And writes to OAM on odd clock cycles
+                (_, Some(DmaStatus { dma_wait: false, dma_count, dma_buffer, .. })) => {
                     self.bus.ppu.oam_dma_write(*dma_count, *dma_buffer);
                     *dma_count = dma_count.wrapping_add(1);
                     // When the count has wrapped around, the DMA is over
@@ -171,7 +178,7 @@ pub trait NesInputDevice {
     /// The lower three bits of the data byte will be held and control input device behaviour.
     /// On a standard NES controller, this will load the shift registers so that they can be polled
     fn latch(&mut self, latch: u8);
-    /// Polls a single bit from the controller
+    /// Polls a single bit from the controller.
     /// On a standard NES controller, this will return the next bit in the controller's shift register.
     ///
     /// The bus parameter is used for simulating open bus behaviour. It should be |ed with the three
