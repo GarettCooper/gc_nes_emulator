@@ -160,8 +160,13 @@ mod test {
 
                 // calculate_rom_size_tests that don't use the format go here
                 #[test]
-                fn nes20_exp_maximum() {
-                   calculate_rom_size(0xff, 0x0f, PROGRAM_ROM_BANK_SIZE, true).expect_err("Did not produce an error for a value that exceeds the maximum addressable range of 64 bit systems");
+                fn nes2_exp_maximum() {
+                   // Pick appropriate size for to match system limitations
+                   if usize::max_value() == u32::max_value() as usize {
+                        calculate_rom_size(0xa0, 0x0f, PROGRAM_ROM_BANK_SIZE, true).expect_err("Did not produce an error for a value that exceeds the maximum addressable range of 32 bit systems");
+                   } else {
+                        calculate_rom_size(0xff, 0x0f, PROGRAM_ROM_BANK_SIZE, true).expect_err("Did not produce an error for a value that exceeds the maximum addressable range of 64 bit systems");
+                   }
                 }
             }
         }
@@ -171,8 +176,8 @@ mod test {
         ines_minimum: 16384, calculate_rom_size(0x01, 0x0f, PROGRAM_ROM_BANK_SIZE, false).unwrap(),
         ines_middle: 65536, calculate_rom_size(0x04, 0x0f, PROGRAM_ROM_BANK_SIZE, false).unwrap(),
         ines_maximum: 0x3fc000, calculate_rom_size(0xff, 0x00, PROGRAM_ROM_BANK_SIZE, false).unwrap(),
-        nes20_base_maximum: 62898176, calculate_rom_size(0xff, 0x0e, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
-        nes20_exp_minimum: 1, calculate_rom_size(0x00, 0x0f, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
-        nes20_exp_middle: 196608, calculate_rom_size(0x41, 0x0f, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
+        nes2_base_maximum: 62898176, calculate_rom_size(0xff, 0x0e, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
+        nes2_exp_minimum: 1, calculate_rom_size(0x00, 0x0f, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
+        nes2_exp_middle: 196608, calculate_rom_size(0x41, 0x0f, PROGRAM_ROM_BANK_SIZE, true).unwrap(),
     }
 }
