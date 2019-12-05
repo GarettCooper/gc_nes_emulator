@@ -11,21 +11,24 @@ mod ppu;
 /// The dimensions of NES screen in pixels
 pub const NES_SCREEN_DIMENSIONS: usize = 256 * 240;
 
-///
-pub struct Nes {
+/// Struct that represents the NES itself
+pub struct Nes<'a> {
     // NES Components-----------------------------------------------------------------------------------------------------------------
     /// The cpu of the NES
     ///
     /// The actual NES used a 2A03 which combined the cpu and apu functionality, but they are represented separately here
     cpu: MOS6502,
     /// The bus of the NES, which holds ownership of the other components
-    bus: Bus,
+    bus: Bus<'a>,
     // Additional Tracking Information------------------------------------------------------------------------------------------------
     /// The number of cycles that have been executed so far
     cycle_count: u64,
 }
 
-struct Bus {
+/// Struct that represents the NES components that are connected to the main bus.
+/// The primary reasons for this classes existence is to allow for reading and writing by the cpu
+/// after the NES has been decomposed.
+struct Bus<'a> {
     /// The cartridge loaded into the NES
     cartridge: Box<Cartridge>,
     /// The picture processing unit of the NES
@@ -34,6 +37,8 @@ struct Bus {
     apu: NesApu,
     /// The NES' two kilobytes of ram               
     ram: Box<[u8; 0x0800]>,
+    /// The input device connected to the NES
+    input_device: &'a mut dyn NesInputDevice,
     /// The status of the OAM DMA process. When OAM DMA is activated the value is set to Some(DmaStatus)
     dma_status: Option<DmaStatus>,
 }
@@ -53,9 +58,9 @@ struct DmaStatus {
     dma_buffer: u8,
 }
 
-impl Nes {
+impl<'a> Nes<'a> {
     /// Creates a new NES instance
-    pub fn new(cartridge: Cartridge) -> Self {
+    pub fn new(cartridge: Cartridge, controller: &'a mut dyn NesInputDevice) -> Self {
         Nes {
             cpu: MOS6502::new(),
             bus: Bus {
@@ -63,12 +68,14 @@ impl Nes {
                 ppu: NesPpu::new(),
                 apu: NesApu::new(),
                 ram: Box::new([0; 0x0800]),
+                input_device: controller,
                 dma_status: None,
             },
             cycle_count: 0,
         }
     }
 
+    /// Executes a single cycle of the NES
     pub fn cycle(&mut self) {
         if self.cycle_count % 3 == 0 {
             //Copy the dma_status so that the bus is not decomposed which would prevent calling methods on it in the match statement
@@ -110,7 +117,7 @@ impl Nes {
     }
 }
 
-impl Bus {
+impl Bus<'_> {
     /// Resets the state of the console components on the bus
     fn reset(&mut self) {
         // TODO: Implement these
@@ -119,13 +126,14 @@ impl Bus {
     }
 }
 
-impl Interface6502 for Bus {
+impl Interface6502 for Bus<'_> {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff], // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.read(&self.cartridge, address), // Mirroring will be done by the ppu
             0x4000..=0x4015 => unimplemented!(),                        // self.apu.read(address)
-            0x4016..=0x4017 => unimplemented!(),                        // self.input.read(address)
+            0x4016 => self.input_device.poll(0x00),                // Read one bit from the first controller TODO: Open Bus Behaviour
+            0x4017 => panic!("Read from second controller address"),    // Read one bit from the second controller TODO: Support this
             0x4018..=0x401f => unimplemented!(),                        // Usually disabled on the nes TODO: Decide how to handle these
             0x4020..=0xffff => self.cartridge.program_read(address),
         }
@@ -138,7 +146,8 @@ impl Interface6502 for Bus {
             0x4000..=0x4013 => unimplemented!(),                                   // self.apu.write(address, data)
             0x4014 => self.dma_status = Some(DmaStatus::new(data)),          // Begins the OAM DMA operation at the data page
             0x4015 => unimplemented!(),
-            0x4016..=0x4017 => unimplemented!(),                                   // self.input.write(address, data)
+            0x4016 => self.input_device.latch(data),                               // Load the shift register on the controllers
+            0x4017 => warn!("Write to second controller address"),                 // Writing to the second controller address is undefined
             0x4018..=0x401f => unimplemented!(),                                   // Usually disabled on the nes
             0x4020..=0xffff => self.cartridge.program_write(address, data),
         }
