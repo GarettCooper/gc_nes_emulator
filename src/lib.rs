@@ -13,3 +13,4 @@ use crate::structopt::StructOpt;
 
 pub mod cartridge;
 pub mod nes;
+pub mod input;
