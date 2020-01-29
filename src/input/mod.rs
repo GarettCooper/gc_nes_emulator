@@ -13,7 +13,9 @@ pub trait NesInputDevice {
 
 /// Enum for representing a NES input port
 pub enum NesInput<'a> {
+    /// State representing no connected controller
     Disconnected,
+    /// State wrapping a controller implementation
     Connected(&'a mut dyn NesInputDevice),
 }
 
