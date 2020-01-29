@@ -11,17 +11,6 @@ pub trait NesInputDevice {
     fn poll(&mut self, bus: u8) -> u8;
 }
 
-/// A struct for simulating an empty controller port
-pub struct NoController();
-
-impl NesInputDevice for NoController {
-    fn latch(&mut self, latch: u8) {}
-
-    fn poll(&mut self, bus: u8) -> u8 {
-        return 0x00 | (bus & 0xf4);
-    }
-}
-
 /// Enum for representing a NES input port
 pub enum NesInput<'a> {
     Disconnected,
