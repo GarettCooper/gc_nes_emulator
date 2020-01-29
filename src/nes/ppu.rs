@@ -58,7 +58,23 @@ impl NesPpu {
         let sprite_priority: bool = true;
 
         match self.scanline {
-            MAX_SCANLINES | 0..=239 => {},
+            MAX_SCANLINES | 0..=239 => {
+                match self.cycle {
+                    // Idle cycle
+                    0 => {}, // TODO: Accurate PPU address bus value
+                    // Cycles for visible pixels
+                    1..=256 => {},
+                    // Fetch the tile data for the sprites on the next scanline
+                    257..=320 => {},
+                    // Fetch the first two tiles for the next scanline
+                    321..=336 => {},
+                    // Final four cycles just make dummy reads
+                    c @ 337..=340 if c % 2 == 0 => { cartridge.character_read(0x00); }, // TODO: Read from the correct location
+                    // Idle cycles to simulate two cycle read time
+                    337..=340 => {},
+                    _ => panic!("Invalid Cycle") // TODO: Consider unreachable!()
+                }
+            },
             240 => {}, // Nothing happens on the first scanline off the screen
             241 => {
                 if self.cycle == 1 { // The vertical blank flag is set on the second cycle of scanline 241
@@ -66,7 +82,7 @@ impl NesPpu {
                 }
             },
             242..=260 => {}, // Nothing continues to happen so that CPU can manipulate PPU freely
-            _ => panic!("Invalid Scanline: {}", self.scanline) // Consider unreachable!()
+            _ => panic!("Invalid Scanline: {}", self.scanline) // TODO: Consider unreachable!()
         }
 
         let l = match (sprite_colour, background_colour, sprite_priority) {
@@ -101,7 +117,7 @@ impl NesPpu {
             0x2005 => panic!("Attempting to read from ppu scroll address"), // TODO: Check this behaviour
             0x2006 => panic!("Attempting to read from ppu vram address"),   // TODO: Check this behaviour
             0x2007 => self.vram_read(),
-            _ => panic!("Invalid PPU Read Address"), //This should never happen since its handled on a higher level
+            _ => panic!("Invalid PPU Read Address"), // TODO: Consider unreachable!()
         }
     }
 
@@ -118,7 +134,7 @@ impl NesPpu {
             0x0005 => self.scroll_write(data),
             0x0006 => self.ppu_address_write(data),
             0x0007 => self.vram_write(data),
-            _ => warn!("Invalid PPU Write Address"), //This should never happen since its handled on a higher level
+            _ => warn!("Invalid PPU Write Address"), // TODO: Consider unreachable!()
         }
     }
 
