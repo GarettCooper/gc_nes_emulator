@@ -38,6 +38,7 @@ fn calculate_rom_size(least_significant_byte: u8, most_significant_byte: u8, ban
 pub struct Cartridge {
     mapper: Box<dyn Mapper>,
     trainer_data: Box<[u8; 512]>,
+    mirroring: Mirroring,
     program_rom: Box<[u8]>,
     program_ram: Box<[u8]>,
     // All character memory is treated as ram as games that only have ROM will not attempt to write to it
@@ -47,12 +48,12 @@ pub struct Cartridge {
 impl Cartridge {
     /// Read from the cartridge's program ROM/RAM through the cartridge's mapper
     pub(crate) fn program_read(&self, address: u16) -> u8 {
-        self.mapper.program_read(&self.program_rom, &self.program_ram, address)
+        return self.mapper.program_read(&self.program_rom, &self.program_ram, address)
     }
 
     /// Read from the cartridge's character ROM/RAM through the cartridge's mapper
     pub(crate) fn character_read(&self, address: u16) -> u8 {
-        self.mapper.character_read(&self.character_ram, address)
+        return self.mapper.character_read(&self.character_ram, address)
     }
 
     /// Write to the cartridge's program RAM through the cartridge's mapper
@@ -60,9 +61,14 @@ impl Cartridge {
         self.mapper.program_write(&mut self.program_ram, address, data)
     }
 
-    /// Write to the cartridge's program RAM through the cartridge's mapper
+    /// Write to the cartridge's character RAM through the cartridge's mapper
     pub(crate) fn character_write(&mut self, address: u16, data: u8) {
         self.mapper.character_write(&mut self.character_ram, address, data)
+    }
+
+    /// Get the mirroring mode from the cartridge
+    pub(crate) fn get_mirroring(&mut self) -> Mirroring {
+        return self.mapper.get_mirroring(self.mirroring);
     }
 
     /// Loads a cartridge from a file
@@ -79,7 +85,10 @@ impl Cartridge {
 
         // Test file format
         if header[..IDENTIFICATION_STRING.len()] == IDENTIFICATION_STRING {
-            let nes2: bool = HeaderFlags7::from_bits_truncate(header[7]).contains(HeaderFlags7::NES_2_IDENTIFIER); // Check if file is NES 2.0
+            let header_flags_6 = HeaderFlags6::from_bits_truncate(header[6]);
+            let header_flags_7 = HeaderFlags7::from_bits_truncate(header[7]);
+
+            let nes2: bool = header_flags_7.contains(HeaderFlags7::NES_2_IDENTIFIER); // Check if file is NES 2.0
             if nes2 {
                 debug!("File is in NES 2.0 format");
             } else {
@@ -92,6 +101,12 @@ impl Cartridge {
                 (header[8] & 0xf0) >> 4,
             )?;
 
+            let mirroring = if header_flags_6.contains(HeaderFlags6::VERTICAL_MIRRORING) {
+                Mirroring::Vertical
+            } else {
+                Mirroring::Horizontal
+            };
+
             let program_rom_size = calculate_rom_size(header[4], header[9] & 0x0f, PROGRAM_ROM_BANK_SIZE, nes2)?;
             debug!("Allocating {} bytes for program ROM", program_rom_size);
 
@@ -100,9 +115,10 @@ impl Cartridge {
 
             let mut cartridge = Cartridge {
                 mapper,
+                mirroring,
                 trainer_data: Box::new([0; 512]),
                 program_rom: vec![0; program_rom_size].into_boxed_slice(),
-                program_ram: Box::new([]), //Empty initialization until I implement this
+                program_ram: Box::new([]), // TODO: Empty initialization until I implement this
                 character_ram: vec![0; character_rom_size].into_boxed_slice(),
             };
 
@@ -140,6 +156,12 @@ bitflags! {
         const NES_2_IDENTIFIER = 0b0000_1100;
         const MAPPER_HI = 0b1111_0000;
     }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) enum Mirroring {
+    Horizontal,
+    Vertical,
 }
 
 #[cfg(test)]

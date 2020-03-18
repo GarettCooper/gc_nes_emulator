@@ -16,6 +16,7 @@ pub(super) trait Mapper {
     fn character_read(&self, character_ram: &[u8], address: u16) -> u8;
     fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8);
     fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8);
+    fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring;
 }
 
 pub(super) struct Mapper000 {}
@@ -42,5 +43,9 @@ impl Mapper for Mapper000 {
 
     fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
         character_ram[usize::from(address)] = data;
+    }
+
+    fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring {
+        return mirroring;
     }
 }
