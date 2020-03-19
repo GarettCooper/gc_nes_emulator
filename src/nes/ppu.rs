@@ -1,4 +1,4 @@
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Cartridge, Mirroring};
 
 /// The total number of scanlines in a frame
 const MAX_SCANLINES: u16 = 261;
@@ -26,7 +26,7 @@ pub(super) struct NesPpu {
     /// The scanline (-1 to 261) of the screen that is currently being drawn
     scanline: u16,
     /// The cycle (0 to 340) of the current scanline
-    cycle: u16
+    cycle: u16,
 }
 
 impl NesPpu {
@@ -46,7 +46,7 @@ impl NesPpu {
             object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
             screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
             scanline: 261,
-            cycle: 0
+            cycle: 0,
         }
     }
 
@@ -180,6 +180,11 @@ impl NesPpu {
 
     pub fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
         &self.screen_buffer
+    }
+
+    /// Maps an address to a name table address by applying mirroring
+    fn apply_name_table_mirroring(&mut self, cartridge: &mut Cartridge, address: u16) -> usize {
+        return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
     }
 }
 
