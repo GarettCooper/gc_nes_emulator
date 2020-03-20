@@ -1,24 +1,43 @@
 use crate::cartridge::{Cartridge, Mirroring};
 
-/// The total number of scanlines in a frame
+/// The total number of scanlines in a frame.
 const MAX_SCANLINES: u16 = 261;
-/// The total number of cycles in a scanline
+/// The total number of cycles in a scanline.
 const MAX_CYCLES: u16 = 340;
+/// Mask for the coarse x bits in the vram addresses.
+const COARSE_X_MASK: u16 = 0b00000000_00011111;
+/// Mask for the coarse y bits in the vram addresses.
+const COARSE_Y_MASK: u16 = 0b00000011_11100000;
+/// The offset of the coarse y bits in the vram address.
+const COARSE_Y_OFFSET: u16 = 5;
+/// Mask for the coarse y bits in the vram addresses.
+const FINE_Y_MASK: u16 = 0b01110000_00000000;
+/// The offset of the coarse y bits in the vram address.
+const FINE_Y_OFFSET: u16 = 12;
 
+#[cfg_attr(test, derive(Clone))]
 pub(super) struct NesPpu {
     ctrl_flags: PpuCtrl,
     mask_flags: PpuMask,
     status_flags: PpuStatus,
     oam_address: u8,
-    ppu_scroll_x: u8,
-    // These are one 16 bit register in the real ppu
-    ppu_scroll_y: u8,
-    /// Latch for multiple writes to ppu_scroll
-    ppu_scroll_latch: bool,
-    ppu_address: u16,
-    /// Latch for multiple writes to ppu_address
-    ppu_address_latch: bool,
-    ppu_data_buffer: u8,
+    /// The register that temporarily holds a vram address before copying it over to the current register
+    temporary_vram_address: u16,
+    /// The register holding the current vram address pointing to the internal memory of the PPU
+    current_vram_address: u16,
+    /// 3 bit address used for scrolling across individual pixels in tiles
+    fine_x_scroll: u8,
+    /// Latch for multiple writes to the address and scroll
+    write_latch: bool,
+    /// Buffer for storing data between reads.
+    data_buffer: u8,
+    /// The pattern ram stores values used for mapping the sprite bitmaps to colours that the NES
+    /// can display.
+    palette_ram: Box<[u8; 0x20]>,
+    /// The name table, which is used for storing the pattern id that should be displayed on the screen
+    /// in a particular location. The two kilobytes of memory are both their own pattern table, which are
+    /// used for scrolling.
+    name_table: Box<[u8; 0x800]>,
     /// Stores 4 bits of information about up to 64 sprites
     object_attribute_memory: Box<[u8; u8::max_value() as usize + 1]>,
     /// The current state of the screen
@@ -37,12 +56,13 @@ impl NesPpu {
             mask_flags: Default::default(),
             status_flags: Default::default(),
             oam_address: 0x00,
-            ppu_scroll_x: 0x00,
-            ppu_scroll_y: 0x00,
-            ppu_scroll_latch: false,
-            ppu_address: 0x0000,
-            ppu_address_latch: false,
-            ppu_data_buffer: 0x00,
+            temporary_vram_address: 0x0000,
+            current_vram_address: 0x0000,
+            fine_x_scroll: 0,
+            write_latch: false,
+            data_buffer: 0x00,
+            palette_ram: Box::new([0; 0x20]),
+            name_table: Box::new([0; 0x800]),
             object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
             screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
             scanline: 261,
@@ -65,7 +85,9 @@ impl NesPpu {
                     // Cycles for visible pixels
                     1..=256 => {},
                     // Fetch the tile data for the sprites on the next scanline
-                    257..=320 => {},
+                    257..=320 => {
+                        self.oam_address = 0;
+                    },
                     // Fetch the first two tiles for the next scanline
                     321..=336 => {},
                     // Final four cycles just make dummy reads
@@ -85,38 +107,41 @@ impl NesPpu {
             _ => panic!("Invalid Scanline: {}", self.scanline) // TODO: Consider unreachable!()
         }
 
-        let l = match (sprite_colour, background_colour, sprite_priority) {
-            (0x00, 0x00, _) => background_colour, //BG0x3f00?
-            (0x00, 0x01..=0x03, _) => sprite_colour,
-            (0x01..=0x03, 0x00, _) => background_colour,
-            (0x01..=0x03, 0x01..=0x03, true) => sprite_colour,
-            (0x01..=0x03, 0x01..=0x03, false) => background_colour,
-            _ => panic!("Invalid colour values") // Consider unreachable!()
-        };
 
         unimplemented!();
     }
 
     /// Function for reading from the PPU. Any address passed to the function will be mapped to one of
     /// the eight valid ppu addresses ( address % 8), equivalent to only using the lowest three bits
-    pub fn read(&mut self, cartridge: &Cartridge, address: u16) -> u8 {
+    pub fn read(&mut self, cartridge: &mut Cartridge, address: u16) -> u8 {
         match address & 0x07 {
             // Mirroring first 3 bits
-            0x2000 => panic!("Attempting to read from ppu control flag"), // TODO: Check this behaviour
-            0x2001 => panic!("Attempting to read from ppu mask flag"),    // TODO: Check this behaviour
-            0x2002 => {
+            0x0000 => panic!("Attempting to read from ppu control flag"), // TODO: Check this behaviour
+            0x0001 => panic!("Attempting to read from ppu mask flag"),    // TODO: Check this behaviour
+            0x0002 => {
                 let value = self.status_flags.bits;
-                // Reset Vertical Blank flag and the two latches
+                // Reset Vertical Blank flag and the latch
                 self.status_flags.set(PpuStatus::VERTICAL_BLANK, false);
-                self.ppu_scroll_latch = false;
-                self.ppu_address_latch = false;
+                self.write_latch = false;
                 return value;
             }
-            0x2003 => panic!("Attempting to read from ppu OAM address"), // TODO: Check this behaviour
-            0x2004 => self.oam_read(),
-            0x2005 => panic!("Attempting to read from ppu scroll address"), // TODO: Check this behaviour
-            0x2006 => panic!("Attempting to read from ppu vram address"),   // TODO: Check this behaviour
-            0x2007 => self.vram_read(),
+            0x0003 => panic!("Attempting to read from ppu OAM address"), // TODO: Check this behaviour
+            0x0004 => self.oam_read(),
+            0x0005 => panic!("Attempting to read from ppu scroll address"), // TODO: Check this behaviour
+            0x0006 => panic!("Attempting to read from ppu vram address"),   // TODO: Check this behaviour
+            0x0007 => {
+                // Reading from the PPU is delayed by a cycle, so return data from the last address
+                // that was read from.
+                let temp = self.data_buffer;
+                self.data_buffer = self.vram_read(self.current_vram_address, cartridge);
+                // Increment the address in the x or y direction depending on a ctrl flag
+                self.current_vram_address += if self.ctrl_flags.contains(PpuCtrl::VRAM_INCREMENT) {
+                    0x20
+                } else {
+                    0x01
+                };
+                return temp
+            },
             _ => panic!("Invalid PPU Read Address"), // TODO: Consider unreachable!()
         }
     }
@@ -126,14 +151,28 @@ impl NesPpu {
     pub fn write(&mut self, cartridge: &mut Cartridge, address: u16, data: u8) {
         match address & 0x07 {
             // Mirroring first 3 bits
-            0x0000 => self.ctrl_flags.bits = data,
+            0x0000 => {
+                self.ctrl_flags.bits = data;
+                // Mask out the nametable selection bits
+                self.temporary_vram_address &= 0b1110011_11111111;
+                // Select the nametables based on the new values set to the ctrl register
+                self.temporary_vram_address = (data as u16 & 0b11) << 10
+            },
             0x0001 => self.mask_flags.bits = data,
             0x0002 => warn!("Ignored attempted write to the ppu status flag. Data: {:2X}", data), // TODO: Check this behaviour
             0x0003 => self.oam_address = data,
             0x0004 => self.oam_write(data),
             0x0005 => self.scroll_write(data),
-            0x0006 => self.ppu_address_write(data),
-            0x0007 => self.vram_write(data),
+            0x0006 => self.vram_address_write(data),
+            0x0007 => {
+                self.vram_write(self.current_vram_address, data, cartridge);
+                // Increment the address in the x or y direction depending on a ctrl flag
+                self.current_vram_address += if self.ctrl_flags.contains(PpuCtrl::VRAM_INCREMENT) {
+                    0x20
+                } else {
+                    0x01
+                }
+            },
             _ => warn!("Invalid PPU Write Address"), // TODO: Consider unreachable!()
         }
     }
@@ -142,8 +181,14 @@ impl NesPpu {
         self.object_attribute_memory[self.oam_address as usize]
     }
 
-    fn vram_read(&mut self) -> u8 {
-        unimplemented!()
+    /// Reads from the internal bus of the PPU
+    fn vram_read(&mut self, address: u16, cartridge: &mut Cartridge) -> u8 {
+        return match address {
+            0x0000..=0x1fff => cartridge.character_read(address),
+            0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)],
+            0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f],
+            _ => panic!("Attempt to read from an invalid PPU bus address!")
+        }
     }
 
     fn oam_write(&mut self, data: u8) {
@@ -155,37 +200,126 @@ impl NesPpu {
         self.object_attribute_memory[self.oam_address.wrapping_add(address) as usize] = data;
     }
 
+    /// Write to the scroll register (Which is also repurposed as the vram address).
+    /// The first write sets x scroll and the second write sets y scroll.
+    ///
+    /// This function and [vram_address_write](#NesPpu::vram_address_write) are both backed by the same register
+    /// but write to it in different ways. See the [NesDev wiki](https://wiki.nesdev.com/w/index.php/PPU_scrolling)
+    /// to learn more.
     fn scroll_write(&mut self, data: u8) {
-        if self.ppu_scroll_latch {
-            self.ppu_scroll_y = data;
+        let data = data as u16; // So that it doesn't need to be cast in every place
+        if self.write_latch {
+            // SECOND WRITE IS TO Y SCROLL
+            // Top 3 bits of the vram address represent fine y scroll, and are set based on the
+            // bottom three bits of the written byte. Bits 8 to 11 represent the coarse y scroll,
+            // and are set based on the top 5 bits of the written byte.
+            self.temporary_vram_address &= 0x0c1f;
+            self.temporary_vram_address |= ((data & 0x07) << FINE_Y_OFFSET) | ((data & 0xf8) << 2);
+            self.write_latch = false;
         } else {
-            self.ppu_scroll_x = data;
+            // FIRST WRITE IS TO X SCROLL
+            // Bottom three bits are written to x scroll register
+            self.fine_x_scroll = data as u8 & 0x07;
+            // Top 5 bits are written to the bottom five bits of the temporary address
+            // (Which represent coarse x scroll)
+            self.temporary_vram_address &= 0xffe0; // Mask out bottom 5 bits
+            self.temporary_vram_address |= data >> 3;
+            self.write_latch = true;
         }
     }
 
-    fn ppu_address_write(&mut self, data: u8) {
-        if self.ppu_address_latch {
-            // Second write to least significant byte
-            self.ppu_address = (0xff00 & self.ppu_address) | u16::from(data)
+    /// Write to the PPU's internal bus address. (Which is also repurposed as the scroll register).
+    /// The first write sets the top six bits of the address and the second write sets the bottom
+    /// eight bits.
+    ///
+    /// This function and [scroll_write](#NesPpu::scroll_write) are both backed by the same register
+    /// but write to it in different ways. See the [NesDev wiki](https://wiki.nesdev.com/w/index.php/PPU_scrolling)
+    /// to learn more.
+    fn vram_address_write(&mut self, data: u8) {
+        if self.write_latch {
+            // Second write is to the bottom byte of the temp vram address
+            self.temporary_vram_address = (0xff00 & self.temporary_vram_address) | u16::from(data);
+            self.current_vram_address = self.temporary_vram_address;
+            self.write_latch = false;
         } else {
-            // First write to most significant byte
-            self.ppu_address = (0x00ff & self.ppu_address) | (u16::from(data) << 8);
-            self.ppu_address_latch = true; // Set latch so next write is to lower byte
+            // First write to bits 13-8 of the temp vram address, the 14th bit is set to 0
+            self.temporary_vram_address = (0x00ff & self.temporary_vram_address) | ((u16::from(data) & 0x3f) << 8);
+            self.write_latch = true; // Set latch so next write is to lower byte
         }
     }
 
-    fn vram_write(&mut self, data: u8) {
-        unimplemented!()
+    /// Increment the coarse x scroll position, accounting for wrapping and name table swapping.
+    fn coarse_x_increment(&mut self) {
+        // If the coarse x address has reached its maximum value...
+        if self.current_vram_address & COARSE_X_MASK == COARSE_X_MASK {
+            // Flip it to zero. 0x0400, the 10th bit, is also flipped, which determines the
+            // Horizontal nametable that is used.
+            self.current_vram_address ^= 0x0400 | COARSE_X_MASK;
+        } else {
+            // Otherwise, just increment the coarse x
+            self.current_vram_address += 0x1;
+        }
     }
 
-    pub fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
-        &self.screen_buffer
+    /// Increment the y scroll value, accounting for coarse/fine bits, wrapping, and nametable swapping
+    fn y_increment(&mut self) {
+        // If the fine y value isn't at its maximum...
+        if (self.current_vram_address >> FINE_Y_OFFSET) != 0x7 {
+            // Just increment it
+            self.current_vram_address += 0x1 << FINE_Y_OFFSET;
+        } else {
+            // Otherwise, wrap the fine y value around to 0
+            self.current_vram_address &= !FINE_Y_MASK;
+            // And increment/wrap coarse y
+            match (self.current_vram_address & COARSE_Y_MASK) >> COARSE_Y_OFFSET {
+                // Wrap around and flip the nametable at 29, because the last two rows are used for
+                // other data, the attribute memory.
+                0x1d => {
+                    // Flip the vertical nametable
+                    self.current_vram_address ^= 0x0800;
+                    // Wrap around
+                    self.current_vram_address &= !COARSE_Y_MASK;
+                },
+                // But if it's at 31, wrap it around without changing vertical nametables.
+                // This is to replicate specific NES behaviour
+                0x1f => self.current_vram_address &= !COARSE_Y_MASK,
+                //Otherwise, increment coarse y
+                _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET
+            }
+        }
+    }
+
+    /// Writes onto the internal bus of the PPU
+    fn vram_write(&mut self, address: u16, data: u8, cartridge: &mut Cartridge) {
+        match address {
+            0x0000..=0x1fff => cartridge.character_write(address, data),
+            0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)] = data,
+            0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f] = data,
+            _ => warn!("Attempt to write to an invalid PPU bus address!")
+        }
+    }
+
+    /// Gets the screen buffer from the PPU
+    pub(super) fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
+        return &self.screen_buffer
     }
 
     /// Maps an address to a name table address by applying mirroring
     fn apply_name_table_mirroring(&mut self, cartridge: &mut Cartridge, address: u16) -> usize {
         return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
     }
+}
+
+/// Function that determines whether the sprite or the background colour will be used for a pixel.
+fn colour_priority(sprite_colour: u8, background_colour: u8, sprite_priority: bool) {
+    match (sprite_colour, background_colour, sprite_priority) {
+        (0x00, 0x00, _) => background_colour, //TODO: BG0x3f00?
+        (0x00, 0x01..=0x03, _) => sprite_colour,
+        (0x01..=0x03, 0x00, _) => background_colour,
+        (0x01..=0x03, 0x01..=0x03, true) => sprite_colour,
+        (0x01..=0x03, 0x01..=0x03, false) => background_colour,
+        _ => panic!("Invalid colour values") // Consider unreachable!()
+    };
 }
 
 bitflags! {
@@ -229,6 +363,7 @@ impl Default for PpuStatus {
     }
 }
 
+#[allow(clippy::unreadable_literal)] // Allow standard 6 character colour hex codes
 const NES_COLOUR_MAP: [u32; 0x40] = [
     0x464646,
     0x00065a,
@@ -295,3 +430,263 @@ const NES_COLOUR_MAP: [u32; 0x40] = [
     0x000000,
     0x000000
 ];
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::nes::NES_SCREEN_DIMENSIONS;
+    use bitflags::_core::fmt::{Debug, Formatter, Error};
+    use std::fmt;
+
+    fn test_colour_priority_sprite() {
+        assert_eq!(0x400, 0x1 << 10)
+    }
+
+    #[test]
+    fn test_vram_address_first_write() {
+        let mut ppu_base = NesPpu {
+            temporary_vram_address: 0b0100110_11010111,
+            current_vram_address: 0b0111000_10110100,
+            write_latch: false,
+            ..Default::default()
+        };
+
+        let data = 0b11110011;
+
+        let ppu_expected = NesPpu {
+            temporary_vram_address: 0b0110011_11010111,
+            write_latch: true,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.vram_address_write(data);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_vram_address_second_write() {
+        let mut ppu_base = NesPpu {
+            temporary_vram_address: 0b1100011_11010111,
+            current_vram_address: 0b0111000_10110100,
+            write_latch: true,
+            ..Default::default()
+        };
+
+        let data = 0b00101000;
+
+        let ppu_expected = NesPpu {
+            temporary_vram_address: 0b1100011_00101000,
+            current_vram_address: 0b1100011_00101000,
+            write_latch: false,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.vram_address_write(data);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_scroll_first_write() {
+        let mut ppu_base = NesPpu {
+            temporary_vram_address: 0b1100011_11010111,
+            current_vram_address: 0b0111000_10110100,
+            fine_x_scroll: 0b101,
+            write_latch: false,
+            ..Default::default()
+        };
+
+        let data = 0b00101010;
+
+        let ppu_expected = NesPpu {
+            temporary_vram_address: 0b1100011_11000101,
+            current_vram_address: 0b0111000_10110100,
+            fine_x_scroll: 0b010,
+            write_latch: true,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.scroll_write(data);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_scroll_second_write() {
+        let mut ppu_base = NesPpu {
+            temporary_vram_address: 0b1100011_11010111,
+            current_vram_address: 0b0111000_10110100,
+            fine_x_scroll: 0b101,
+            write_latch: true,
+            ..Default::default()
+        };
+
+        let data = 0b00101010;
+
+        let ppu_expected = NesPpu {
+            temporary_vram_address: 0b0100000_10110111,
+            current_vram_address: 0b0111000_10110100,
+            fine_x_scroll: 0b101,
+            write_latch: false,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.scroll_write(data);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_coarse_x_increment_7() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b0111000_10100111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0111000_10101000,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.coarse_x_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_coarse_x_increment_31() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b0111000_10111111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0111100_10100000,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.coarse_x_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_y_increment_fine_4() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b1001000_10111111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b1011000_10111111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.y_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_y_increment_fine_7() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b1111000_10111111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0001000_11011111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.y_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_y_increment_fine_7_coarse_29() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b1110011_10111111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0001000_00011111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.y_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_y_increment_fine_7_coarse_31() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b1110011_11111111,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0000000_00011111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.y_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    impl Default for NesPpu {
+        fn default() -> Self {
+            NesPpu {
+                ctrl_flags: Default::default(),
+                mask_flags: Default::default(),
+                status_flags: Default::default(),
+                oam_address: 0,
+                temporary_vram_address: 0,
+                current_vram_address: 0,
+                fine_x_scroll: 0,
+                write_latch: false,
+                data_buffer: 0,
+                palette_ram: Box::new([0; 32]),
+                name_table: Box::new([0; 2048]),
+                object_attribute_memory: Box::new([0; 256]),
+                screen_buffer: Box::new([0; NES_SCREEN_DIMENSIONS]),
+                scanline: 0,
+                cycle: 0,
+            }
+        }
+    }
+
+    impl Debug for NesPpu {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            f.debug_struct("NesPPU")
+                .field("ctrl_flags", &self.ctrl_flags)
+                .field("mask_flags", &self.mask_flags)
+                .field("status_flags", &self.status_flags)
+                .field("temporary_vram_address", &self.temporary_vram_address)
+                .field("current_vram_address", &self.current_vram_address)
+                .field("fine_x_scroll", &self.fine_x_scroll)
+                .field("ppu_write_latch", &self.write_latch)
+                .field("ppu_data_buffer", &self.data_buffer)
+                .field("scanline", &self.scanline)
+                .field("cycle", &self.cycle)
+                .finish()
+            //TODO: Add additional fields
+        }
+    }
+
+    impl PartialEq for NesPpu {
+        fn eq(&self, other: &Self) -> bool {
+            self.ctrl_flags == other.ctrl_flags &&
+                self.mask_flags == other.mask_flags &&
+                self.status_flags == other.status_flags &&
+                self.temporary_vram_address == other.temporary_vram_address &&
+                self.current_vram_address == other.current_vram_address &&
+                self.fine_x_scroll == other.fine_x_scroll &&
+                self.write_latch == other.write_latch &&
+                self.data_buffer == other.data_buffer &&
+                self.scanline == other.scanline &&
+                self.cycle == other.cycle
+            //TODO: Add additional fields
+        }
+
+        fn ne(&self, other: &Self) -> bool {
+            !self.eq(other)
+        }
+    }
+}

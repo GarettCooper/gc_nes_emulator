@@ -151,7 +151,7 @@ impl Interface6502 for Bus<'_> {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff], // Addresses 0x0800-0x1fff mirror the 2KiB of ram
-            0x2000..=0x3fff => self.ppu.read(&self.cartridge, address), // Mirroring will be done by the ppu
+            0x2000..=0x3fff => self.ppu.read(&mut self.cartridge, address), // Mirroring will be done by the ppu
             0x4000..=0x4015 => unimplemented!(),                        // self.apu.read(address)
             0x4016 => self.input_device_one.poll(0x00),            // Read one bit from the first controller TODO: Open Bus Behaviour
             0x4017 => self.input_device_two.poll(0x00),            // Read one bit from the second controller
