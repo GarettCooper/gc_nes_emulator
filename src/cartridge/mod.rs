@@ -165,6 +165,82 @@ pub(crate) enum Mirroring {
 }
 
 #[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+
+    pub(crate) fn get_mock_cartridge(mapper_mock: MapperMock) -> Cartridge {
+        return Cartridge {
+            mapper: Box::new(mapper_mock),
+            trainer_data: Box::new([0; 512]),
+            mirroring: Mirroring::Horizontal,
+            program_rom: Box::new([0]),
+            program_ram: Box::new([0]),
+            character_ram: Box::new([0]),
+        }
+    }
+
+    impl Default for Cartridge {
+        fn default() -> Self {
+            return get_mock_cartridge(Default::default())
+        }
+    }
+
+    /// Mapper mock struct for testing Cartridge interactions in other modules
+    pub(crate) struct MapperMock {
+        pub(crate) program_read_count: u16,
+        pub(crate) program_read_stub: fn(u16, u16) -> u8,
+        pub(crate) character_read_count: u16,
+        pub(crate) character_read_stub: fn(u16, u16) -> u8,
+        pub(crate) program_write_count: u16,
+        pub(crate) program_write_stub: fn(u16, u8, u16),
+        pub(crate) character_write_count: u16,
+        pub(crate) character_write_stub: fn(u16, u8, u16),
+        pub(crate) get_mirroring_count: u16,
+        pub(crate) get_mirroring_stub: fn(u16) -> Mirroring,
+    }
+
+    impl Mapper for MapperMock {
+        fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
+            return (self.program_read_stub)(address, self.program_read_count)
+        }
+
+        fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
+            return (self.character_read_stub)(address, self.character_read_count)
+        }
+
+        fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
+            (self.program_write_stub)(address, data, self.program_write_count)
+        }
+
+        fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
+            (self.character_write_stub)(address, data, self.character_write_count)
+        }
+
+        fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring {
+            (self.get_mirroring_stub)(self.get_mirroring_count)
+        }
+    }
+
+
+    impl Default for MapperMock {
+        fn default() -> Self {
+            Self {
+                program_read_count: 0,
+                program_read_stub: |_, _| { panic!("Unexpected call to program_read_stub!") },
+                character_read_count: 0,
+                character_read_stub: |_, _| { panic!("Unexpected call to character_read_stub!") },
+                program_write_count: 0,
+                program_write_stub: |_, _, _| { panic!("Unexpected call to program_write_stub!") },
+                character_write_count: 0,
+                character_write_stub: |_, _, _| { panic!("Unexpected call to character_write_stub!") },
+                get_mirroring_count: 0,
+                get_mirroring_stub: |_| { panic!("Unexpected call to get_mirroring_stub!") },
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod test {
     use super::*;
 
