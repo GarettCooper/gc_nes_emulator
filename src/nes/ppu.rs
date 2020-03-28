@@ -299,7 +299,7 @@ impl NesPpu {
         return match address {
             0x0000..=0x1fff => cartridge.character_read(address),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)],
-            0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f],
+            0x3f00..=0x3fff => self.palette_ram[self.apply_palette_mirroring(address)],
             _ => panic!("Attempt to read from an invalid PPU bus address: 0x{:4X}!", address)
         }
     }
@@ -433,7 +433,7 @@ impl NesPpu {
         match address {
             0x0000..=0x1fff => cartridge.character_write(address, data),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)] = data,
-            0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f] = data,
+            0x3f00..=0x3fff => self.palette_ram[self.apply_palette_mirroring(address)] = data,
             _ => panic!("Attempt to write to an invalid PPU bus address: 0x{:4X}!", address)
         }
     }
@@ -448,6 +448,20 @@ impl NesPpu {
         return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
     }
 
+    /// Mirror palette addresses to show the universal background colour when necessary.
+    /// Returns the index in the palette ram array that the address points to.
+    fn apply_palette_mirroring(&self, address: u16) -> usize {
+        return if address < 0x3f11 && address & 0x03 == 0x0 {
+            // Address 0x3f00 is the universal background colour, background palettes 0x3f01 through
+            // 0x3f0d mirror the universal background colour with their last byte. This means
+            // that a value of zero in the bitmap of a background sprite will always return the
+            // universal background colour.
+            0x3f00
+        } else {
+            address
+        } as usize & 0x1f // Apply mirroring
+    }
+
     /// Calculates the address of the attribute table byte for a location in the name table.
     fn read_attribute_table_byte(&mut self, cartridge: &mut Cartridge) -> u8 {
         // Select the correct attribute table based on the nametable bits in the vram address
@@ -459,18 +473,18 @@ impl NesPpu {
         // Return the two bits of the attribute byte that refer to the correct quadrant
         return (self.vram_read(attribute_address, cartridge) >> (((attribute_address & 0x10) >> 0x2) | (attribute_address & 0x2)) as u8) & 0x3;
     }
-}
 
-/// Function that determines whether the sprite or the background colour will be used for a pixel.
-fn colour_priority(sprite_colour: u8, background_colour: u8, sprite_priority: bool) {
-    match (sprite_colour, background_colour, sprite_priority) {
-        (0x00, 0x00, _) => background_colour, //TODO: BG0x3f00?
-        (0x00, 0x01..=0x03, _) => sprite_colour,
-        (0x01..=0x03, 0x00, _) => background_colour,
-        (0x01..=0x03, 0x01..=0x03, true) => sprite_colour,
-        (0x01..=0x03, 0x01..=0x03, false) => background_colour,
-        _ => panic!("Invalid colour values") // Consider unreachable!()
-    };
+    /// Function that determines whether the sprite or the background colour will be used for a pixel.
+    fn colour_priority(sprite_colour: u8, background_colour: u8, sprite_priority: bool) {
+        match (sprite_colour, background_colour, sprite_priority) {
+            (0x00, 0x00, _) => background_colour,
+            (0x00, 0x01..=0x03, _) => sprite_colour,
+            (0x01..=0x03, 0x00, _) => background_colour,
+            (0x01..=0x03, 0x01..=0x03, true) => sprite_colour,
+            (0x01..=0x03, 0x01..=0x03, false) => background_colour,
+            _ => panic!("Invalid colour values") // Consider unreachable!()
+        };
+    }
 }
 
 bitflags! {
