@@ -114,7 +114,7 @@ impl<'a> Nes<'a> {
             self.bus.dma_status = dma_status;
         }
         // PPU cycle runs regardless
-        self.bus.ppu.cycle(&mut self.bus.cartridge);
+        self.bus.ppu.cycle(&mut self.bus.cartridge, &mut self.cpu);
         self.cycle_count += 1;
     }
 

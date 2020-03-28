@@ -1,9 +1,13 @@
 use crate::cartridge::{Cartridge, Mirroring};
+use super::emulator_6502::MOS6502;
 
 /// The total number of scanlines in a frame.
 const MAX_SCANLINES: u16 = 261;
 /// The total number of cycles in a scanline.
 const MAX_CYCLES: u16 = 340;
+/// The total number of cycles in a scanline minus one. This is necessary
+/// because math can't be done in pattern matching expressions.
+const MAX_CYCLES_MINUS_ONE: u16 = MAX_SCANLINES - 1;
 /// Mask for the coarse x bits in the vram addresses.
 const COARSE_X_MASK: u16 = 0b00000000_00011111;
 /// Mask for the coarse y bits in the vram addresses.
@@ -17,9 +21,13 @@ const FINE_Y_OFFSET: u16 = 12;
 
 #[cfg_attr(test, derive(Clone))]
 pub(super) struct NesPpu {
+    /// Register containing flags used for controlling the function of the PPU
     ctrl_flags: PpuCtrl,
+    /// Register containing flags used for controlling the rendering
     mask_flags: PpuMask,
+    /// Flags that can only be read, used to inform the CPU of the PPU's status
     status_flags: PpuStatus,
+    /// Address pointing to the current location in the Object Attribute Memory
     oam_address: u8,
     /// The register that temporarily holds a vram address before copying it over to the current register
     temporary_vram_address: u16,
@@ -30,7 +38,7 @@ pub(super) struct NesPpu {
     /// Latch for multiple writes to the address and scroll
     write_latch: bool,
     /// Buffer for storing data between reads.
-    data_buffer: u8,
+    read_buffer: u8,
     /// The pattern ram stores values used for mapping the sprite bitmaps to colours that the NES
     /// can display.
     palette_ram: Box<[u8; 0x20]>,
@@ -42,10 +50,30 @@ pub(super) struct NesPpu {
     object_attribute_memory: Box<[u8; u8::max_value() as usize + 1]>,
     /// The current state of the screen
     screen_buffer: Box<[u32; super::NES_SCREEN_DIMENSIONS]>,
-    /// The scanline (-1 to 261) of the screen that is currently being drawn
+    /// The scanline (0 to 261) of the screen that is currently being drawn
     scanline: u16,
     /// The cycle (0 to 340) of the current scanline
     cycle: u16,
+    /// Counts the number of frames that have been rendered so far.
+    frame_count: u64,
+    /// Latch that stores the byte of low bits from the pattern table before they are moved into the
+    /// shift register.
+    pattern_latch_lo: u8,
+    /// Latch that stores the byte of high bits from the pattern table before they are moved into the
+    /// shift register.
+    pattern_latch_hi: u8,
+    /// Shift register that stores the low bits from the pattern table for the next tile to be rendered
+    pattern_shifter_lo: u16,
+    /// Shift register that stores the high bits from the pattern table for the next tile to be rendered
+    pattern_shifter_hi: u16,
+    /// Latch that stores the next attribute table byte before it is moved into the shift register
+    attribute_latch: u8,
+    /// Shift register that stores the high bits of the attribute table information for the tile being rendered
+    attribute_shifter_lo: u8,
+    /// Shift register that stores the low bits of the attribute table information for the tile being rendered
+    attribute_shifter_hi: u8,
+    /// Buffer that stores the pattern table id read from the nametable
+    nametable_id: u8,
 }
 
 impl NesPpu {
@@ -60,38 +88,101 @@ impl NesPpu {
             current_vram_address: 0x0000,
             fine_x_scroll: 0,
             write_latch: false,
-            data_buffer: 0x00,
+            read_buffer: 0x00,
             palette_ram: Box::new([0; 0x20]),
             name_table: Box::new([0; 0x800]),
             object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
             screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
             scanline: 261,
             cycle: 0,
+            frame_count: 0,
+            pattern_latch_lo: 0,
+            pattern_latch_hi: 0,
+            pattern_shifter_lo: 0,
+            pattern_shifter_hi: 0,
+            attribute_latch: 0,
+            attribute_shifter_lo: 0,
+            attribute_shifter_hi: 0,
+            nametable_id: 0,
         }
     }
 
     /// Runs a single PPU cycle, which draws a single pixel into the frame buffer
-    pub fn cycle(&mut self, cartridge: &Cartridge) {
-
-        let sprite_colour: u8 = 0x01;
-        let background_colour: u8 = 0x02;
-        let sprite_priority: bool = true;
-
+    pub fn cycle(&mut self, cartridge: &mut Cartridge, cpu: &mut MOS6502) {
         match self.scanline {
             MAX_SCANLINES | 0..=239 => {
                 match self.cycle {
                     // Idle cycle
                     0 => {}, // TODO: Accurate PPU address bus value
                     // Cycles for visible pixels
-                    1..=256 => {},
-                    // Fetch the tile data for the sprites on the next scanline
-                    257..=320 => {
-                        self.oam_address = 0;
+                    1..=256 | 321..=336 => {
+                        // Move the shifters that store pixel information
+                        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
+                            self.attribute_shifter_lo >>= 1;
+                            self.attribute_shifter_hi >>= 1;
+                            self.pattern_shifter_lo >>= 1;
+                            self.pattern_shifter_hi >>= 1;
+                        }
+
+                        match self.cycle % 8 {
+                            1 => {
+                                // Load the shifters from the latches
+                                self.reload_shifters();
+                                // Read the byte of the next pattern from the nametable
+                                self.nametable_id = self.vram_read(0x2000 | self.current_vram_address & 0x0fff, cartridge);
+                            },
+                            // Read the byte from the attribute table containing palette information
+                            3 => self.attribute_latch = self.read_attribute_table_byte(cartridge),
+                            // Read the lo bits for the next 8 pixels from the pattern table.
+                            // To do this, the bit set in the control flag which picks the first or
+                            // second pattern table is combined with the pattern id in the nametable
+                            // and the fine y scroll in the address.
+                            5 => self.pattern_latch_lo = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
+                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> 12), cartridge),
+                            // Same as above, but offset by eight pixels
+                            7 => self.pattern_latch_hi = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
+                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> 12) + 8, cartridge),
+                            // Increment the coarse x value every eight cycles
+                            0 => self.coarse_x_increment(),
+                            // Do nothing otherwise
+                            _ => {},
+                        }
+
+                        // Draw pixel to the screen during visible pixels
+                        if self.cycle <= 256 && self.scanline != MAX_SCANLINES {
+                            // The offset is the number of bits the target pixel bit needs to be shifted
+                            // by to be placed in the least significant bit position.
+                            let offset = self.fine_x_scroll;
+                            let pixel = (((self.pattern_shifter_hi >> offset) << 1) & 0x2) | ((self.pattern_shifter_lo >> offset) & 0x1);
+                            let palette = (((self.attribute_shifter_hi >> offset) << 1) & 0x2) | ((self.attribute_shifter_lo >> offset) & 0x1);
+                            self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel, cartridge) as usize]
+                        }
+
+                        // Special Cases!
+                        if self.scanline == MAX_SCANLINES && self.cycle == 1 {
+                            // Clear the status flags at the start of the pre-render scanline
+                            self.status_flags.bits = 0;
+                        } else if self.cycle == 256 {
+                            // Increment the y address at the end of each visible scanline
+                            self.y_increment()
+                        }
                     },
-                    // Fetch the first two tiles for the next scanline
-                    321..=336 => {},
+                    // Load the x information from the temporary vram address into the active vram address
+                    257 => {
+                        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
+                            self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK)) | (self.temporary_vram_address & (0x400 | COARSE_X_MASK))
+                        }
+                    },
+                    258..=279 => {},
+                    // Load the y information from the temporary vram address into the active vram address repeatedly
+                    280..=304 => {
+                        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) && self.scanline == MAX_SCANLINES {
+                            self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK)) | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
+                        }
+                    },
+                    305..=320 => {},
                     // Final four cycles just make dummy reads
-                    c @ 337..=340 if c % 2 == 0 => { cartridge.character_read(0x00); }, // TODO: Read from the correct location
+                    c @ 337..=340 if c & 0x1 == 0 => { cartridge.character_read(0x00); }, // TODO: Read from the correct location
                     // Idle cycles to simulate two cycle read time
                     337..=340 => {},
                     _ => panic!("Invalid Cycle") // TODO: Consider unreachable!()
@@ -101,14 +192,30 @@ impl NesPpu {
             241 => {
                 if self.cycle == 1 { // The vertical blank flag is set on the second cycle of scanline 241
                     self.status_flags.set(PpuStatus::VERTICAL_BLANK, true);
+                    if self.ctrl_flags.intersects(PpuCtrl::NMI_ENABLE) {
+                        // Trigger a non maskable interrupt on the CPU
+                        cpu.non_maskable_interrupt_request();
+                    }
                 }
             },
             242..=260 => {}, // Nothing continues to happen so that CPU can manipulate PPU freely
             _ => panic!("Invalid Scanline: {}", self.scanline) // TODO: Consider unreachable!()
         }
 
-
-        unimplemented!();
+        // Increase the cycle count and rollover the scanline if necessary
+        match (self.cycle, self.scanline, self.frame_count & 0x1) {
+            // On odd frames, skip the last cycle of the pre-render scanline
+            (MAX_CYCLES, MAX_SCANLINES, 0) | (MAX_CYCLES_MINUS_ONE, MAX_SCANLINES, 1) => {
+                self.cycle = 0;
+                self.scanline = 0;
+                self.frame_count += 1;
+            },
+            (MAX_CYCLES, _, _) => {
+                self.cycle = 0;
+                self.scanline += 1;
+            },
+            _ => self.cycle += 1
+        }
     }
 
     /// Function for reading from the PPU. Any address passed to the function will be mapped to one of
@@ -119,7 +226,9 @@ impl NesPpu {
             0x0000 => panic!("Attempting to read from ppu control flag"), // TODO: Check this behaviour
             0x0001 => panic!("Attempting to read from ppu mask flag"),    // TODO: Check this behaviour
             0x0002 => {
-                let value = self.status_flags.bits;
+                // When the value of the status flag is read, the bottom values retain whatever was last
+                // on the PPU bus
+                let value = self.status_flags.bits | (self.read_buffer & 0x1f);
                 // Reset Vertical Blank flag and the latch
                 self.status_flags.set(PpuStatus::VERTICAL_BLANK, false);
                 self.write_latch = false;
@@ -130,12 +239,16 @@ impl NesPpu {
             0x0005 => panic!("Attempting to read from ppu scroll address"), // TODO: Check this behaviour
             0x0006 => panic!("Attempting to read from ppu vram address"),   // TODO: Check this behaviour
             0x0007 => {
-                // Reading from the PPU is delayed by a cycle, so return data from the last address
+                // Reading from the PPU is delayed by a cycle*, so return data from the last address
                 // that was read from.
-                let temp = self.data_buffer;
-                self.data_buffer = self.vram_read(self.current_vram_address, cartridge);
+                let mut temp = self.read_buffer;
+                self.read_buffer = self.vram_read(self.current_vram_address, cartridge);
+
+                // *Except for reads from tha palette memory
+                if self.current_vram_address >= 0x3f00 { temp = self.read_buffer }
+
                 // Increment the address in the x or y direction depending on a ctrl flag
-                self.current_vram_address += if self.ctrl_flags.contains(PpuCtrl::VRAM_INCREMENT) {
+                self.current_vram_address += if self.ctrl_flags.intersects(PpuCtrl::VRAM_INCREMENT) {
                     0x20
                 } else {
                     0x01
@@ -167,7 +280,7 @@ impl NesPpu {
             0x0007 => {
                 self.vram_write(self.current_vram_address, data, cartridge);
                 // Increment the address in the x or y direction depending on a ctrl flag
-                self.current_vram_address += if self.ctrl_flags.contains(PpuCtrl::VRAM_INCREMENT) {
+                self.current_vram_address += if self.ctrl_flags.intersects(PpuCtrl::VRAM_INCREMENT) {
                     0x20
                 } else {
                     0x01
@@ -187,7 +300,7 @@ impl NesPpu {
             0x0000..=0x1fff => cartridge.character_read(address),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)],
             0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f],
-            _ => panic!("Attempt to read from an invalid PPU bus address!")
+            _ => panic!("Attempt to read from an invalid PPU bus address: 0x{:4X}!", address)
         }
     }
 
@@ -244,69 +357,107 @@ impl NesPpu {
         } else {
             // First write to bits 13-8 of the temp vram address, the 14th bit is set to 0
             self.temporary_vram_address = (0x00ff & self.temporary_vram_address) | ((u16::from(data) & 0x3f) << 8);
-            self.write_latch = true; // Set latch so next write is to lower byte
+            self.write_latch = true;
         }
     }
 
     /// Increment the coarse x scroll position, accounting for wrapping and name table swapping.
     fn coarse_x_increment(&mut self) {
-        // If the coarse x address has reached its maximum value...
-        if self.current_vram_address & COARSE_X_MASK == COARSE_X_MASK {
-            // Flip it to zero. 0x0400, the 10th bit, is also flipped, which determines the
-            // Horizontal nametable that is used.
-            self.current_vram_address ^= 0x0400 | COARSE_X_MASK;
-        } else {
-            // Otherwise, just increment the coarse x
-            self.current_vram_address += 0x1;
+        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
+            // If the coarse x address has reached its maximum value...
+            if self.current_vram_address & COARSE_X_MASK == COARSE_X_MASK {
+                // Flip it to zero. 0x0400, the 10th bit, is also flipped, which determines the
+                // Horizontal nametable that is used.
+                self.current_vram_address ^= 0x0400 | COARSE_X_MASK;
+            } else {
+                // Otherwise, just increment the coarse x
+                self.current_vram_address += 0x1;
+            }
         }
     }
 
     /// Increment the y scroll value, accounting for coarse/fine bits, wrapping, and nametable swapping
     fn y_increment(&mut self) {
-        // If the fine y value isn't at its maximum...
-        if (self.current_vram_address >> FINE_Y_OFFSET) != 0x7 {
-            // Just increment it
-            self.current_vram_address += 0x1 << FINE_Y_OFFSET;
-        } else {
-            // Otherwise, wrap the fine y value around to 0
-            self.current_vram_address &= !FINE_Y_MASK;
-            // And increment/wrap coarse y
-            match (self.current_vram_address & COARSE_Y_MASK) >> COARSE_Y_OFFSET {
-                // Wrap around and flip the nametable at 29, because the last two rows are used for
-                // other data, the attribute memory.
-                0x1d => {
-                    // Flip the vertical nametable
-                    self.current_vram_address ^= 0x0800;
-                    // Wrap around
-                    self.current_vram_address &= !COARSE_Y_MASK;
-                },
-                // But if it's at 31, wrap it around without changing vertical nametables.
-                // This is to replicate specific NES behaviour
-                0x1f => self.current_vram_address &= !COARSE_Y_MASK,
-                //Otherwise, increment coarse y
-                _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET
+        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
+            // If the fine y value isn't at its maximum...
+            if (self.current_vram_address >> FINE_Y_OFFSET) != 0x7 {
+                // Just increment it
+                self.current_vram_address += 0x1 << FINE_Y_OFFSET;
+            } else {
+                // Otherwise, wrap the fine y value around to 0
+                self.current_vram_address &= !FINE_Y_MASK;
+                // And increment/wrap coarse y
+                match (self.current_vram_address & COARSE_Y_MASK) >> COARSE_Y_OFFSET {
+                    // Wrap around and flip the nametable at 29, because the last two rows are used for
+                    // other data, the attribute memory.
+                    0x1d => {
+                        // Flip the vertical nametable
+                        self.current_vram_address ^= 0x0800;
+                        // Wrap around
+                        self.current_vram_address &= !COARSE_Y_MASK;
+                    },
+                    // But if it's at 31, wrap it around without changing vertical nametables.
+                    // This is to replicate specific NES behaviour
+                    0x1f => self.current_vram_address &= !COARSE_Y_MASK,
+                    //Otherwise, increment coarse y
+                    _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET
+                }
             }
         }
     }
 
-    /// Writes onto the internal bus of the PPU
+    /// Loads the data from the latches into the shifters.
+    fn reload_shifters(&mut self) {
+        // Set all eight bits of the low bits attribute shifter to the least significant bit in the
+        // attribute latch.
+        self.attribute_shifter_lo = if self.attribute_latch & 0x1 == 1 {
+            0xff
+        } else {
+            0x00
+        };
+        // Set all eight bits of the high bits attribute shifter to the second least significant bit
+        // in the attribute latch.
+        self.attribute_shifter_hi = if self.attribute_latch & 0x2 == 2 {
+            0xff
+        } else {
+            0x00
+        };
+        // Set the top eight bits of the low pattern shifter to the bits of the low pattern latch
+        self.pattern_shifter_lo = (self.pattern_shifter_lo & 0xff) | ((self.pattern_latch_lo as u16) << 8);
+        // Set the top eight bits of the high pattern shifter to the bits of the high pattern latch
+        self.pattern_shifter_hi = (self.pattern_shifter_hi & 0xff) | ((self.pattern_latch_hi as u16) << 8);
+    }
+
+    /// Writes onto the internal bus of the PPU.
     fn vram_write(&mut self, address: u16, data: u8, cartridge: &mut Cartridge) {
         match address {
             0x0000..=0x1fff => cartridge.character_write(address, data),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)] = data,
             0x3f00..=0x3fff => self.palette_ram[usize::from(address) & 0x1f] = data,
-            _ => warn!("Attempt to write to an invalid PPU bus address!")
+            _ => panic!("Attempt to write to an invalid PPU bus address: 0x{:4X}!", address)
         }
     }
 
-    /// Gets the screen buffer from the PPU
+    /// Gets the screen buffer from the PPU.
     pub(super) fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
         return &self.screen_buffer
     }
 
-    /// Maps an address to a name table address by applying mirroring
+    /// Maps an address to a name table address by applying mirroring.
     fn apply_name_table_mirroring(&mut self, cartridge: &mut Cartridge, address: u16) -> usize {
         return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
+    }
+
+    /// Calculates the address of the attribute table byte for a location in the name table.
+    fn read_attribute_table_byte(&mut self, cartridge: &mut Cartridge) -> u8 {
+        // Select the correct attribute table based on the nametable bits in the vram address
+        let mut attribute_address = 0x23c0 | (self.current_vram_address & 0xc00);
+        // Select the attribute byte in the x direction (top 3 bits of the x component)
+        attribute_address |= (self.current_vram_address & 0x01f) >> 2;
+        // Select the attribute byte in the y direction (top 3 bits of the y component moved into the correct position)
+        attribute_address |= (self.current_vram_address & 0x380) >> 4;
+        // Return the two bits of the attribute byte that refer to the correct quadrant
+        return (self.vram_read(attribute_address, cartridge) >> (((attribute_address & 0x10) >> 0x2) | (attribute_address & 0x2)) as u8) & 0x3;
     }
 }
 
@@ -344,7 +495,7 @@ bitflags! {
         const SPRITE_ENABLE = 0b0001_0000;// 1: Show sprites
         const BACKGROUND_ENABLE = 0b0000_1000;// 1: Show background
         const SPRITE_LEFT_ENABLE = 0b0000_0100;// 1: Show sprites in leftmost 8 pixels of screen, 0: Hide
-        const BACKGROUN_LEFT_ENABLE = 0b0000_0010; // 1: Show background in leftmost 8 pixels of screen, 0: Hide
+        const BACKGROUND_LEFT_ENABLE = 0b0000_0010; // 1: Show background in leftmost 8 pixels of screen, 0: Hide
         const GREYSCALE = 0b0000_0001; // Greyscale (0: normal color, 1: produce a greyscale display)
     }
 }
@@ -435,9 +586,10 @@ const NES_COLOUR_MAP: [u32; 0x40] = [
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::cartridge::test_utils::*;
     use crate::nes::NES_SCREEN_DIMENSIONS;
-    use bitflags::_core::fmt::{Debug, Formatter, Error};
-    use std::fmt;
+    use std::fmt::{Debug, Result, Formatter};
+    // TODO: Fix Expected/Actual positions
 
     fn test_colour_priority_sprite() {
         assert_eq!(0x400, 0x1 << 10)
@@ -538,6 +690,7 @@ mod test {
     fn test_coarse_x_increment_7() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b0111000_10100111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -554,6 +707,7 @@ mod test {
     fn test_coarse_x_increment_31() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b0111000_10111111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -567,9 +721,27 @@ mod test {
     }
 
     #[test]
+    fn test_coarse_x_increment_disabled() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b0111000_10111111,
+            mask_flags: PpuMask::from_bits(0x00).unwrap(),
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0111000_10111111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.coarse_x_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
     fn test_y_increment_fine_4() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b1001000_10111111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -586,6 +758,7 @@ mod test {
     fn test_y_increment_fine_7() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b1111000_10111111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -602,6 +775,7 @@ mod test {
     fn test_y_increment_fine_7_coarse_29() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b1110011_10111111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -618,6 +792,7 @@ mod test {
     fn test_y_increment_fine_7_coarse_31() {
         let mut ppu_base = NesPpu {
             current_vram_address: 0b1110011_11111111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
             ..Default::default()
         };
 
@@ -628,6 +803,194 @@ mod test {
 
         ppu_base.y_increment();
         assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_y_increment_disabled() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b0111000_10111111,
+            mask_flags: PpuMask::from_bits(0x00).unwrap(),
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            current_vram_address: 0b0111000_10111111,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.y_increment();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_read_attribute_table_byte_top_left() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b00000000_00000000,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x23C0, 0x2, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            current_vram_address: 0b00000000_00000000,
+            ..ppu_base.clone()
+        };
+
+        assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_read_attribute_table_byte_top_right() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b00000000_00011100,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x23C7, 0x3 << 2, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            current_vram_address: 0b00000000_00011100,
+            ..ppu_base.clone()
+        };
+
+        assert_eq!(0x3, ppu_base.read_attribute_table_byte(&mut cartridge));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_read_attribute_table_byte_bottom_left() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b00000011_10000000,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x23f8, 0x1 << 4, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            current_vram_address: 0b00000011_10000000,
+            ..ppu_base.clone()
+        };
+
+        assert_eq!(0x1, ppu_base.read_attribute_table_byte(&mut cartridge));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_read_attribute_table_byte_bottom_right() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b00000011_10011100,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x23ff, 0x2 << 6, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            current_vram_address: 0b00000011_10011100,
+            ..ppu_base.clone()
+        };
+
+        assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_read_attribute_table_byte_other_nametable() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b00001011_10011100,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x2bff, 0x2 << 6, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            current_vram_address: 0b00001011_10011100,
+            ..ppu_base.clone()
+        };
+
+        assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_reload_shifters_attribute_0b01() {
+        let mut ppu_base = NesPpu {
+            attribute_latch: 0b01,
+            pattern_latch_lo: 0xcf,
+            pattern_latch_hi: 0x4a,
+            attribute_shifter_lo: 0x00,
+            attribute_shifter_hi: 0xff,
+            pattern_shifter_lo: 0x17,
+            pattern_shifter_hi: 0xa5,
+            ..Default::default()
+        };
+
+        let mut ppu_expected = NesPpu {
+            attribute_latch: 0b01,
+            pattern_latch_lo: 0xcf,
+            pattern_latch_hi: 0x4a,
+            attribute_shifter_lo: 0xff,
+            attribute_shifter_hi: 0x00,
+            pattern_shifter_lo: (0xcf << 8) | 0x17,
+            pattern_shifter_hi: (0x4a << 8) | 0xa5,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.reload_shifters();
+        assert_eq!(ppu_base, ppu_expected)
+    }
+
+    #[test]
+    fn test_reload_shifters_attribute_0b10() {
+        let mut ppu_base = NesPpu {
+            attribute_latch: 0b10,
+            pattern_latch_lo: 0x91,
+            pattern_latch_hi: 0xaa,
+            attribute_shifter_lo: 0xff,
+            attribute_shifter_hi: 0x00,
+            pattern_shifter_lo: 0x00,
+            pattern_shifter_hi: 0xcd,
+            ..Default::default()
+        };
+
+        let mut ppu_expected = NesPpu {
+            attribute_latch: 0b10,
+            pattern_latch_lo: 0x91,
+            pattern_latch_hi: 0xaa,
+            attribute_shifter_lo: 0x00,
+            attribute_shifter_hi: 0xff,
+            pattern_shifter_lo: (0x91 << 8) | 0x00,
+            pattern_shifter_hi: (0xaa << 8) | 0xcd,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.reload_shifters();
+        assert_eq!(ppu_base, ppu_expected)
     }
 
     impl Default for NesPpu {
@@ -641,19 +1004,28 @@ mod test {
                 current_vram_address: 0,
                 fine_x_scroll: 0,
                 write_latch: false,
-                data_buffer: 0,
+                read_buffer: 0,
                 palette_ram: Box::new([0; 32]),
                 name_table: Box::new([0; 2048]),
                 object_attribute_memory: Box::new([0; 256]),
                 screen_buffer: Box::new([0; NES_SCREEN_DIMENSIONS]),
                 scanline: 0,
                 cycle: 0,
+                frame_count: 0,
+                pattern_latch_lo: 0,
+                pattern_latch_hi: 0,
+                pattern_shifter_lo: 0,
+                pattern_shifter_hi: 0,
+                attribute_latch: 0,
+                attribute_shifter_lo: 0,
+                attribute_shifter_hi: 0,
+                nametable_id: 0,
             }
         }
     }
 
     impl Debug for NesPpu {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
             f.debug_struct("NesPPU")
                 .field("ctrl_flags", &self.ctrl_flags)
                 .field("mask_flags", &self.mask_flags)
@@ -662,9 +1034,18 @@ mod test {
                 .field("current_vram_address", &self.current_vram_address)
                 .field("fine_x_scroll", &self.fine_x_scroll)
                 .field("ppu_write_latch", &self.write_latch)
-                .field("ppu_data_buffer", &self.data_buffer)
+                .field("ppu_data_buffer", &self.read_buffer)
                 .field("scanline", &self.scanline)
                 .field("cycle", &self.cycle)
+                .field("frame_count", &self.frame_count)
+                .field("pattern_latch_lo", &self.pattern_latch_lo)
+                .field("pattern_latch_hi", &self.pattern_latch_hi)
+                .field("pattern_shifter_lo", &self.pattern_shifter_lo)
+                .field("pattern_shifter_hi", &self.pattern_shifter_hi)
+                .field("attribute_latch", &self.attribute_latch)
+                .field("attribute_shifter_lo", &self.attribute_shifter_lo)
+                .field("attribute_shifter_hi", &self.attribute_shifter_hi)
+                .field("nametable_id", &self.nametable_id)
                 .finish()
             //TODO: Add additional fields
         }
@@ -679,9 +1060,18 @@ mod test {
                 self.current_vram_address == other.current_vram_address &&
                 self.fine_x_scroll == other.fine_x_scroll &&
                 self.write_latch == other.write_latch &&
-                self.data_buffer == other.data_buffer &&
+                self.read_buffer == other.read_buffer &&
                 self.scanline == other.scanline &&
-                self.cycle == other.cycle
+                self.cycle == other.cycle &&
+                self.frame_count == other.frame_count &&
+                self.pattern_latch_lo == other.pattern_latch_lo &&
+                self.pattern_latch_hi == other.pattern_latch_hi &&
+                self.pattern_shifter_lo == other.pattern_shifter_lo &&
+                self.pattern_shifter_hi == other.pattern_shifter_hi &&
+                self.attribute_latch == other.attribute_latch &&
+                self.attribute_shifter_lo == other.attribute_shifter_lo &&
+                self.attribute_shifter_hi == other.attribute_shifter_hi &&
+                self.nametable_id == other.nametable_id
             //TODO: Add additional fields
         }
 
