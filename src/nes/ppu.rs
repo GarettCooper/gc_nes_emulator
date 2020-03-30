@@ -7,7 +7,7 @@ const MAX_SCANLINES: u16 = 261;
 const MAX_CYCLES: u16 = 340;
 /// The total number of cycles in a scanline minus one. This is necessary
 /// because math can't be done in pattern matching expressions.
-const MAX_CYCLES_MINUS_ONE: u16 = MAX_SCANLINES - 1;
+const MAX_CYCLES_MINUS_ONE: u16 = MAX_CYCLES - 1;
 /// Mask for the coarse x bits in the vram addresses.
 const COARSE_X_MASK: u16 = 0b00000000_00011111;
 /// Mask for the coarse y bits in the vram addresses.
@@ -177,7 +177,7 @@ impl NesPpu {
                     // Load the y information from the temporary vram address into the active vram address repeatedly
                     280..=304 => {
                         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) && self.scanline == MAX_SCANLINES {
-                            self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK)) | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
+                            self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK)) | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK));
                         }
                     },
                     305..=320 => {},
@@ -386,7 +386,7 @@ impl NesPpu {
             } else {
                 // Otherwise, wrap the fine y value around to 0
                 self.current_vram_address &= !FINE_Y_MASK;
-                // And increment/wrap coarse y
+                // And increment coarse y, wrapping if necessary
                 match (self.current_vram_address & COARSE_Y_MASK) >> COARSE_Y_OFFSET {
                     // Wrap around and flip the nametable at 29, because the last two rows are used for
                     // other data, the attribute memory.
@@ -399,7 +399,7 @@ impl NesPpu {
                     // But if it's at 31, wrap it around without changing vertical nametables.
                     // This is to replicate specific NES behaviour
                     0x1f => self.current_vram_address &= !COARSE_Y_MASK,
-                    //Otherwise, increment coarse y
+                    //Otherwise, just increment coarse y
                     _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET
                 }
             }
