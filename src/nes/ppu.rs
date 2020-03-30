@@ -170,7 +170,7 @@ impl NesPpu {
                     // Load the x information from the temporary vram address into the active vram address
                     257 => {
                         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                            self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK)) | (self.temporary_vram_address & (0x400 | COARSE_X_MASK))
+                            self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK)) | (self.temporary_vram_address & (0x400 | COARSE_X_MASK));
                         }
                     },
                     258..=279 => {},
@@ -363,6 +363,7 @@ impl NesPpu {
 
     /// Increment the coarse x scroll position, accounting for wrapping and name table swapping.
     fn coarse_x_increment(&mut self) {
+        //!("Current X Scroll: {}", self.current_vram_address & COARSE_X_MASK);
         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
             // If the coarse x address has reached its maximum value...
             if self.current_vram_address & COARSE_X_MASK == COARSE_X_MASK {
@@ -380,7 +381,7 @@ impl NesPpu {
     fn y_increment(&mut self) {
         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
             // If the fine y value isn't at its maximum...
-            if (self.current_vram_address >> FINE_Y_OFFSET) != 0x7 {
+            if (self.current_vram_address & FINE_Y_MASK) != FINE_Y_MASK {
                 // Just increment it
                 self.current_vram_address += 0x1 << FINE_Y_OFFSET;
             } else {
@@ -467,11 +468,16 @@ impl NesPpu {
         // Select the correct attribute table based on the nametable bits in the vram address
         let mut attribute_address = 0x23c0 | (self.current_vram_address & 0xc00);
         // Select the attribute byte in the x direction (top 3 bits of the x component)
-        attribute_address |= (self.current_vram_address & 0x01f) >> 2;
+        attribute_address |= (self.current_vram_address & COARSE_X_MASK) >> 2;
         // Select the attribute byte in the y direction (top 3 bits of the y component moved into the correct position)
         attribute_address |= (self.current_vram_address & 0x380) >> 4;
         // Return the two bits of the attribute byte that refer to the correct quadrant
-        return (self.vram_read(attribute_address, cartridge) >> (((attribute_address & 0x10) >> 0x2) | (attribute_address & 0x2)) as u8) & 0x3;
+        return self.vram_read(attribute_address, cartridge) >> (
+            // Shift the attribute byte right by four bits if we're selecting one of the bottom tiles
+            (((self.current_vram_address >> COARSE_Y_OFFSET) & 0x02) << 0x1) |
+                // Shift the attribute byte right two bits we're selecting one of the right tiles
+                ((self.current_vram_address) & 0x02)
+        ) & 0x03; // Only return the last two bits
     }
 
     /// Function that determines whether the sprite or the background colour will be used for a pixel.
@@ -851,7 +857,6 @@ mod test {
         ppu_base.vram_write(0x23C0, 0x2, &mut cartridge);
 
         let mut ppu_expected = NesPpu {
-            current_vram_address: 0b00000000_00000000,
             ..ppu_base.clone()
         };
 
@@ -862,7 +867,7 @@ mod test {
     #[test]
     fn test_read_attribute_table_byte_top_right() {
         let mut ppu_base = NesPpu {
-            current_vram_address: 0b00000000_00011100,
+            current_vram_address: 0b00000000_00011110,
             ..Default::default()
         };
 
@@ -874,7 +879,6 @@ mod test {
         ppu_base.vram_write(0x23C7, 0x3 << 2, &mut cartridge);
 
         let mut ppu_expected = NesPpu {
-            current_vram_address: 0b00000000_00011100,
             ..ppu_base.clone()
         };
 
@@ -885,7 +889,7 @@ mod test {
     #[test]
     fn test_read_attribute_table_byte_bottom_left() {
         let mut ppu_base = NesPpu {
-            current_vram_address: 0b00000011_10000000,
+            current_vram_address: 0b00000011_11000000,
             ..Default::default()
         };
 
@@ -897,7 +901,6 @@ mod test {
         ppu_base.vram_write(0x23f8, 0x1 << 4, &mut cartridge);
 
         let mut ppu_expected = NesPpu {
-            current_vram_address: 0b00000011_10000000,
             ..ppu_base.clone()
         };
 
@@ -908,7 +911,7 @@ mod test {
     #[test]
     fn test_read_attribute_table_byte_bottom_right() {
         let mut ppu_base = NesPpu {
-            current_vram_address: 0b00000011_10011100,
+            current_vram_address: 0b00000011_11011110,
             ..Default::default()
         };
 
@@ -920,7 +923,6 @@ mod test {
         ppu_base.vram_write(0x23ff, 0x2 << 6, &mut cartridge);
 
         let mut ppu_expected = NesPpu {
-            current_vram_address: 0b00000011_10011100,
             ..ppu_base.clone()
         };
 
@@ -931,7 +933,7 @@ mod test {
     #[test]
     fn test_read_attribute_table_byte_other_nametable() {
         let mut ppu_base = NesPpu {
-            current_vram_address: 0b00001011_10011100,
+            current_vram_address: 0b00001011_11011110,
             ..Default::default()
         };
 
@@ -943,7 +945,6 @@ mod test {
         ppu_base.vram_write(0x2bff, 0x2 << 6, &mut cartridge);
 
         let mut ppu_expected = NesPpu {
-            current_vram_address: 0b00001011_10011100,
             ..ppu_base.clone()
         };
 
