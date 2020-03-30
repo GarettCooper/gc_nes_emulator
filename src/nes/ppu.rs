@@ -55,7 +55,7 @@ pub(super) struct NesPpu {
     /// The cycle (0 to 340) of the current scanline
     cycle: u16,
     /// Counts the number of frames that have been rendered so far.
-    frame_count: u64,
+    pub(super) frame_count: u64,
     /// Latch that stores the byte of low bits from the pattern table before they are moved into the
     /// shift register.
     pattern_latch_lo: u8,
@@ -118,10 +118,10 @@ impl NesPpu {
                     1..=256 | 321..=336 => {
                         // Move the shifters that store pixel information
                         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
-                            self.attribute_shifter_lo >>= 1;
-                            self.attribute_shifter_hi >>= 1;
-                            self.pattern_shifter_lo >>= 1;
-                            self.pattern_shifter_hi >>= 1;
+                            self.attribute_shifter_lo <<= 1;
+                            self.attribute_shifter_hi <<= 1;
+                            self.pattern_shifter_lo <<= 1;
+                            self.pattern_shifter_hi <<= 1;
                         }
 
                         match self.cycle % 8 {
@@ -129,7 +129,7 @@ impl NesPpu {
                                 // Load the shifters from the latches
                                 self.reload_shifters();
                                 // Read the byte of the next pattern from the nametable
-                                self.nametable_id = self.vram_read(0x2000 | self.current_vram_address & 0x0fff, cartridge);
+                                self.nametable_id = self.vram_read((0x2000 | self.current_vram_address & 0x0fff), cartridge);
                             },
                             // Read the byte from the attribute table containing palette information
                             3 => self.attribute_latch = self.read_attribute_table_byte(cartridge),
@@ -152,8 +152,8 @@ impl NesPpu {
                         if self.cycle <= 256 && self.scanline != MAX_SCANLINES {
                             // The offset is the number of bits the target pixel bit needs to be shifted
                             // by to be placed in the least significant bit position.
-                            let offset = self.fine_x_scroll;
-                            let pixel = (((self.pattern_shifter_hi >> offset) << 1) & 0x2) | ((self.pattern_shifter_lo >> offset) & 0x1);
+                            let offset = 0x7 - self.fine_x_scroll;
+                            let pixel = (((self.pattern_shifter_hi << offset) & 0x8000) >> 14) | (((self.pattern_shifter_lo << offset) & 0x8000) >> 15);
                             let palette = (((self.attribute_shifter_hi >> offset) << 1) & 0x2) | ((self.attribute_shifter_lo >> offset) & 0x1);
                             self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel, cartridge) as usize]
                         }
@@ -422,10 +422,10 @@ impl NesPpu {
         } else {
             0x00
         };
-        // Set the top eight bits of the low pattern shifter to the bits of the low pattern latch
-        self.pattern_shifter_lo = (self.pattern_shifter_lo & 0xff) | ((self.pattern_latch_lo as u16) << 8);
-        // Set the top eight bits of the high pattern shifter to the bits of the high pattern latch
-        self.pattern_shifter_hi = (self.pattern_shifter_hi & 0xff) | ((self.pattern_latch_hi as u16) << 8);
+        // Set the bottom eight bits of the low pattern shifter to the bits of the low pattern latch
+        self.pattern_shifter_lo = (self.pattern_shifter_lo & 0xff00) | self.pattern_latch_lo as u16;
+        // Set the bottom eight bits of the high pattern shifter to the bits of the high pattern latch
+        self.pattern_shifter_hi = (self.pattern_shifter_hi & 0xff00) | self.pattern_latch_hi as u16;
     }
 
     /// Writes onto the internal bus of the PPU.
@@ -959,8 +959,8 @@ mod test {
             pattern_latch_hi: 0x4a,
             attribute_shifter_lo: 0x00,
             attribute_shifter_hi: 0xff,
-            pattern_shifter_lo: 0x17,
-            pattern_shifter_hi: 0xa5,
+            pattern_shifter_lo: 0x1700,
+            pattern_shifter_hi: 0xa500,
             ..Default::default()
         };
 
@@ -970,8 +970,8 @@ mod test {
             pattern_latch_hi: 0x4a,
             attribute_shifter_lo: 0xff,
             attribute_shifter_hi: 0x00,
-            pattern_shifter_lo: (0xcf << 8) | 0x17,
-            pattern_shifter_hi: (0x4a << 8) | 0xa5,
+            pattern_shifter_lo: 0x1700 | 0xcf,
+            pattern_shifter_hi: 0xa500 | 0x4a,
             ..ppu_base.clone()
         };
 
@@ -988,7 +988,7 @@ mod test {
             attribute_shifter_lo: 0xff,
             attribute_shifter_hi: 0x00,
             pattern_shifter_lo: 0x00,
-            pattern_shifter_hi: 0xcd,
+            pattern_shifter_hi: 0xcd00,
             ..Default::default()
         };
 
@@ -998,8 +998,8 @@ mod test {
             pattern_latch_hi: 0xaa,
             attribute_shifter_lo: 0x00,
             attribute_shifter_hi: 0xff,
-            pattern_shifter_lo: (0x91 << 8) | 0x00,
-            pattern_shifter_hi: (0xaa << 8) | 0xcd,
+            pattern_shifter_lo: 0x91,
+            pattern_shifter_hi: 0xcd00 | 0xaa,
             ..ppu_base.clone()
         };
 
