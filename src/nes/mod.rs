@@ -119,11 +119,12 @@ impl<'a> Nes<'a> {
     }
 
     pub fn frame(&mut self) -> &[u32; NES_SCREEN_DIMENSIONS] {
-        for _ in 1..=89340 {
+        let current_frame = self.bus.ppu.frame_count;
+        while self.bus.ppu.frame_count == current_frame {
             self.cycle();
             //trace!("Cycle Count: {}", self.cycle_count)
         }
-        self.get_screen()
+        return self.get_screen()
     }
 
     /// Connect a controller to the first input port
