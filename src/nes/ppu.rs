@@ -138,10 +138,10 @@ impl NesPpu {
                             // second pattern table is combined with the pattern id in the nametable
                             // and the fine y scroll in the address.
                             5 => self.pattern_latch_lo = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
-                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> 12), cartridge),
+                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> FINE_Y_OFFSET), cartridge),
                             // Same as above, but offset by eight pixels
                             7 => self.pattern_latch_hi = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
-                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> 12) + 8, cartridge),
+                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> FINE_Y_OFFSET) + 8, cartridge),
                             // Increment the coarse x value every eight cycles
                             0 => self.coarse_x_increment(),
                             // Do nothing otherwise
@@ -152,9 +152,9 @@ impl NesPpu {
                         if self.cycle <= 256 && self.scanline != MAX_SCANLINES {
                             // The offset is the number of bits the target pixel bit needs to be shifted
                             // by to be placed in the least significant bit position.
-                            let offset = 0x7 - self.fine_x_scroll;
+                            let offset = self.fine_x_scroll;
                             let pixel = (((self.pattern_shifter_hi << offset) & 0x8000) >> 14) | (((self.pattern_shifter_lo << offset) & 0x8000) >> 15);
-                            let palette = (((self.attribute_shifter_hi >> offset) << 1) & 0x2) | ((self.attribute_shifter_lo >> offset) & 0x1);
+                            let palette = (((self.attribute_shifter_hi >> (0x7 - offset)) << 1) & 0x2) | ((self.attribute_shifter_lo >> (0x7 - offset)) & 0x1);
                             self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel, cartridge) as usize]
                         }
 
@@ -185,7 +185,7 @@ impl NesPpu {
                     c @ 337..=340 if c & 0x1 == 0 => { cartridge.character_read(0x00); }, // TODO: Read from the correct location
                     // Idle cycles to simulate two cycle read time
                     337..=340 => {},
-                    _ => panic!("Invalid Cycle") // TODO: Consider unreachable!()
+                    _ => panic!("Invalid Cycle: {}", self.cycle) // TODO: Consider unreachable!()
                 }
             },
             240 => {}, // Nothing happens on the first scanline off the screen
@@ -363,7 +363,6 @@ impl NesPpu {
 
     /// Increment the coarse x scroll position, accounting for wrapping and name table swapping.
     fn coarse_x_increment(&mut self) {
-        //!("Current X Scroll: {}", self.current_vram_address & COARSE_X_MASK);
         if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
             // If the coarse x address has reached its maximum value...
             if self.current_vram_address & COARSE_X_MASK == COARSE_X_MASK {
