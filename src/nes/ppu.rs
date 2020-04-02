@@ -68,10 +68,10 @@ pub(super) struct NesPpu {
     pattern_shifter_hi: u16,
     /// Latch that stores the next attribute table byte before it is moved into the shift register
     attribute_latch: u8,
-    /// Shift register that stores the high bits of the attribute table information for the tile being rendered
-    attribute_shifter_lo: u8,
-    /// Shift register that stores the low bits of the attribute table information for the tile being rendered
-    attribute_shifter_hi: u8,
+    /// Shift register that stores the high bits of the attribute table information for the two tiles being rendered
+    attribute_shifter_lo: u16,
+    /// Shift register that stores the low bits of the attribute table information for the two tiles being rendered
+    attribute_shifter_hi: u16,
     /// Buffer that stores the pattern table id read from the nametable
     nametable_id: u8,
 }
@@ -154,7 +154,7 @@ impl NesPpu {
                             // by to be placed in the least significant bit position.
                             let offset = self.fine_x_scroll;
                             let pixel = (((self.pattern_shifter_hi << offset) & 0x8000) >> 14) | (((self.pattern_shifter_lo << offset) & 0x8000) >> 15);
-                            let palette = (((self.attribute_shifter_hi >> (0x7 - offset)) << 1) & 0x2) | ((self.attribute_shifter_lo >> (0x7 - offset)) & 0x1);
+                            let palette = (((self.attribute_shifter_hi << offset) & 0x8000) >> 14) | (((self.attribute_shifter_lo << offset) & 0x8000) >> 15);
                             self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel, cartridge) as usize]
                         }
 
@@ -410,14 +410,14 @@ impl NesPpu {
     fn reload_shifters(&mut self) {
         // Set all eight bits of the low bits attribute shifter to the least significant bit in the
         // attribute latch.
-        self.attribute_shifter_lo = if self.attribute_latch & 0x1 == 1 {
+        self.attribute_shifter_lo = (self.attribute_shifter_lo & 0xff00) | if self.attribute_latch & 0x1 == 1 {
             0xff
         } else {
             0x00
         };
         // Set all eight bits of the high bits attribute shifter to the second least significant bit
         // in the attribute latch.
-        self.attribute_shifter_hi = if self.attribute_latch & 0x2 == 2 {
+        self.attribute_shifter_hi = (self.attribute_shifter_hi & 0xff00) | if self.attribute_latch & 0x2 == 2 {
             0xff
         } else {
             0x00
@@ -957,8 +957,8 @@ mod test {
             attribute_latch: 0b01,
             pattern_latch_lo: 0xcf,
             pattern_latch_hi: 0x4a,
-            attribute_shifter_lo: 0x00,
-            attribute_shifter_hi: 0xff,
+            attribute_shifter_lo: 0x0000,
+            attribute_shifter_hi: 0xff00,
             pattern_shifter_lo: 0x1700,
             pattern_shifter_hi: 0xa500,
             ..Default::default()
@@ -968,8 +968,8 @@ mod test {
             attribute_latch: 0b01,
             pattern_latch_lo: 0xcf,
             pattern_latch_hi: 0x4a,
-            attribute_shifter_lo: 0xff,
-            attribute_shifter_hi: 0x00,
+            attribute_shifter_lo: 0x00ff,
+            attribute_shifter_hi: 0xff00,
             pattern_shifter_lo: 0x1700 | 0xcf,
             pattern_shifter_hi: 0xa500 | 0x4a,
             ..ppu_base.clone()
@@ -985,8 +985,8 @@ mod test {
             attribute_latch: 0b10,
             pattern_latch_lo: 0x91,
             pattern_latch_hi: 0xaa,
-            attribute_shifter_lo: 0xff,
-            attribute_shifter_hi: 0x00,
+            attribute_shifter_lo: 0x0000,
+            attribute_shifter_hi: 0xff00,
             pattern_shifter_lo: 0x00,
             pattern_shifter_hi: 0xcd00,
             ..Default::default()
@@ -996,8 +996,8 @@ mod test {
             attribute_latch: 0b10,
             pattern_latch_lo: 0x91,
             pattern_latch_hi: 0xaa,
-            attribute_shifter_lo: 0x00,
-            attribute_shifter_hi: 0xff,
+            attribute_shifter_lo: 0x0000,
+            attribute_shifter_hi: 0xffff,
             pattern_shifter_lo: 0x91,
             pattern_shifter_hi: 0xcd00 | 0xaa,
             ..ppu_base.clone()
