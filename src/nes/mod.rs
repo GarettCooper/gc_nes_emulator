@@ -49,7 +49,7 @@ struct Bus<'a> {
 /// Struct that wraps an option to represent if oam dma is in progress and how far along it is.
 /// If the value is None, no DMA is in progress.
 /// If the value is Some(n), DMA has been running for n cycles.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct DmaStatus {
     /// A latch to ensure that DMA waits 1 or 2 cycles before beginning to copy data
     dma_wait: bool,
@@ -90,16 +90,22 @@ impl<'a> Nes<'a> {
             // I should consider alternatives.
             match (self.cycle_count, &mut dma_status) {
                 // DMA disabled, CPU cycles every third ppu dot
-                (_, None) => self.cpu.cycle(&mut self.bus),
+                (_, None) => {
+                    self.cpu.cycle(&mut self.bus);
+                    // DMA status may have been changed, copy it back
+                    dma_status = self.bus.dma_status;
+                },
                 // DMA ENABLED ------------------------------------------------------------------------------------------------------------
                 // DMA can only start on an even clock cycle
-                (c, Some(DmaStatus { dma_wait: wait @ true, .. })) if c % 2 == 1 => *wait = false,
+                (c, Some(DmaStatus { dma_wait: wait @ true, .. })) if c % 2 == 1 => {
+                    trace!("DMA Initiated on cycle: {}!", self.cycle_count);
+                    *wait = false;
+                },
                 // DMA must wait a clock cycle for reads to be resolved
                 (_, Some(DmaStatus { dma_wait: true, .. })) => (),
                 // DMA reads from memory on even clock cycles
                 (c, Some(DmaStatus { dma_wait: false, dma_start_address, dma_count, dma_buffer })) if c % 2 == 0 => {
                     *dma_buffer = self.bus.read(*dma_start_address + *dma_count as u16);
-                    *dma_count = dma_count.wrapping_add(1);
                 }
                 // And writes to OAM on odd clock cycles
                 (_, Some(DmaStatus { dma_wait: false, dma_count, dma_buffer, .. })) => {
@@ -107,7 +113,8 @@ impl<'a> Nes<'a> {
                     *dma_count = dma_count.wrapping_add(1);
                     // When the count has wrapped around, the DMA is over
                     if *dma_count == 0 {
-                        self.bus.dma_status = None;
+                        dma_status = None;
+                        trace!("DMA ended on cycle: {}!", self.cycle_count);
                     }
                 }
             }
