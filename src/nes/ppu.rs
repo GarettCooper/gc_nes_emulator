@@ -115,7 +115,7 @@ impl NesPpu {
             read_buffer: 0x00,
             palette_ram: Box::new([0; 0x20]),
             name_table: Box::new([0; 0x800]),
-            object_attribute_memory: Box::new([0; u8::max_value() as usize + 1]),
+            object_attribute_memory: Box::new([0xff; u8::max_value() as usize + 1]),
             secondary_object_attribute_memory: [0; 0x20],
             screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
             scanline: 261,
@@ -350,8 +350,8 @@ impl NesPpu {
                             // The real PPU does this over eight cycles, but for the time being
                             // but I'm  going to do it all in one for simplicity.
                             1 => {
+                                // Reset on the first cycle
                                 if self.cycle == 257 {
-                                    trace!("Load Sprite Shifters");
                                     self.secondary_sprite_evaluation_index = 0;
                                 }
 
@@ -362,7 +362,6 @@ impl NesPpu {
                                     let sprite_pattern_id = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 1] as u16; // Cast here instead of later
                                     self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits_truncate(self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2]);
                                     self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16;
-                                    trace!("Scanline: {}, Y Coord: {}", self.scanline, sprite_y);
                                     let mut sprite_pattern_row = (self.scanline - sprite_y as u16);
                                     // If the vertical mirroring bit is set in the attribute byte
                                     if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::VERTICAL_MIRROR) {
@@ -371,8 +370,8 @@ impl NesPpu {
                                         sprite_pattern_row = 0x07 - (sprite_pattern_row & 0x07);
                                     }
 
-                                    let sprite_address: u16 = if self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
-                                        ((self.ctrl_flags & PpuCtrl::NAMETABLE_SELECT).bits << 8) as u16 |
+                                    let sprite_address: u16 = if !self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
+                                        (((self.ctrl_flags & PpuCtrl::NAMETABLE_SELECT).bits as u16) << 8) |
                                             (sprite_pattern_id << 4) |
                                             sprite_pattern_row
                                     } else {
