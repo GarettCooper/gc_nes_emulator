@@ -14,3 +14,4 @@ minifb = "0.13.0"
 bitflags = "1.2.0"
 simple-error = "0.2.1"
 structopt = "0.3" # Replace with clap when 3.0.0 comes out of beta
+bit_reverse = "0.1.8"
