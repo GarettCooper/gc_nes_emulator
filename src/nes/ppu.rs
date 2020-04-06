@@ -256,55 +256,6 @@ impl NesPpu {
                                     self.sprite_evaluation_wrapped = self.sprite_evaluation_wrapped || temp_bool;
                                 }
                             },
-                            // Since the background circuits aren't being used in the horizontal
-                            // blanking period, the same circuits are reused to load the sprites
-                            257..=320 => {
-                                trace!("Cycle {}", self.cycle);
-                                match self.cycle % 8 {
-                                    // The real PPU does this over eight cycles, but for the time being
-                                    // but I'm  going to do it all in one for simplicity.
-                                    1 => {
-                                        trace!("Load Sprite Shifters");
-                                        let sprite_index = self.secondary_sprite_evaluation_index as usize / 4;
-                                        let sprite_pattern_id = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 1] as u16; // Cast here instead of later
-
-                                        self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits(self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2]).unwrap();
-                                        self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16;
-
-                                        let mut sprite_pattern_row = (self.scanline - self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize] as u16);
-                                        // If the vertical mirroring bit is set in the attribute byte
-                                        if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::VERTICAL_MIRROR) {
-                                            // In case of a 16 pixel tall sprite, make sure only the
-                                            // least significant 3 bits are subtracted.
-                                            sprite_pattern_row = 0x07 - (sprite_pattern_row & 0x07);
-                                        }
-
-                                        let sprite_address: u16 = if self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
-                                            ((self.ctrl_flags & PpuCtrl::NAMETABLE_SELECT).bits << 8) as u16 |
-                                                (sprite_pattern_id << 4) |
-                                                sprite_pattern_row
-                                        } else {
-                                            // For 16 pixel tall sprites, the pattern table is selected
-                                            // based on the least significant bit of the pattern id instead
-                                            // of the nametable select flag.
-                                            ((sprite_pattern_id & 0x01) << 12) |
-                                                ((sprite_pattern_id | 0x01) << 4) |
-                                                sprite_pattern_row
-                                        };
-
-                                        self.sprite_shifters_lo[sprite_index] = self.vram_read(sprite_address, cartridge);
-                                        self.sprite_shifters_hi[sprite_index] = self.vram_read(sprite_address + 8, cartridge);
-
-                                        if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::HORIZONTAL_MIRROR) {
-                                            self.sprite_shifters_lo[sprite_index] = self.sprite_shifters_lo[sprite_index].swap_bits();
-                                            self.sprite_shifters_hi[sprite_index] = self.sprite_shifters_hi[sprite_index].swap_bits();
-                                        }
-
-                                        self.secondary_sprite_evaluation_index += 4;
-                                    },
-                                    _ => {}
-                                }
-                            },
                             _ => {}
                         }
 
@@ -331,6 +282,7 @@ impl NesPpu {
                                 if self.sprite_x_offsets[i] > -0x8 {
                                     self.sprite_x_offsets[i] -= 1;
                                 }
+
                                 // If the x offset is in range and a higher priority sprite isn't already on this pixel
                                 if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
                                     foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6) | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
@@ -380,7 +332,8 @@ impl NesPpu {
 
                                     self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits_truncate(self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2]);
 
-                                    self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16;
+                                    // Small workaround, add one to the x offset to account for the difference between cycles and x coordinates
+                                    self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16 + 1;
                                     let mut sprite_pattern_row = (self.scanline - sprite_y as u16);
                                     // If the vertical mirroring bit is set in the attribute byte
                                     if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::VERTICAL_MIRROR) {
