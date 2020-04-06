@@ -2,7 +2,7 @@ use crate::structopt::StructOpt;
 use gc_nes_emulator::cartridge::Cartridge;
 use gc_nes_emulator::nes::Nes;
 use gc_nes_emulator::input::{NesInput, NesInputDevice};
-use minifb::{Window, Key, WindowOptions};
+use minifb::{Window, Key, WindowOptions, Scale};
 use std::path::Path;
 
 #[macro_use]
@@ -13,17 +13,29 @@ extern crate structopt;
 fn main() {
     let arguments = Arguments::from_args();
 
-    std::env::set_var("RUST_LOG", "trace"); // TODO: Replace this with an argument
+    //std::env::set_var("RUST_LOG", "gc_nes_emulator::nes=trace"); // TODO: Replace this with an argument
     env_logger::init();
 
     // TODO: Setup window scaling
-    let window = Window::new("Test", 256, 240, WindowOptions::default()).expect("Error opening window");
+    let mut window = Window::new("gc_nes_emulator", 256, 240, WindowOptions { scale: Scale::X4, ..Default::default() }).expect("Error opening window");
 
     info!("Starting {} by {}, version {}...", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_AUTHORS"), env!("CARGO_PKG_VERSION"));
-    let mut cartridge = Cartridge::load_from_file(Path::new(&arguments.file)).expect("File read error"); // TODO: Present a message to the user instead of crashing
-    let mut controller = MiniFbNesController::new(&window);
+    let cartridge = Cartridge::load_from_file(Path::new(&arguments.file)).expect("File read error"); // TODO: Present a message to the user instead of crashing
+    //let mut controller = MiniFbNesController::new(&window);
     let mut nes = Nes::new(cartridge);
-    nes.connect_controller_one(NesInput::Connected(&mut controller));
+    //nes.connect_controller_one(NesInput::Connected(&mut controller));
+    let buffer = nes.frame();
+    window.update_with_buffer(buffer);
+
+    while window.is_open() == true {
+        if window.is_key_down(Key::F) {
+            let now = std::time::SystemTime::now();
+            let buffer = nes.frame();
+            window.update_with_buffer(buffer).expect("Error updating frame buffer");
+        } else {
+            window.update()
+        }
+    }
 }
 
 #[derive(StructOpt, Debug)]
