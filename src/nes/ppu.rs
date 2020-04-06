@@ -473,7 +473,7 @@ impl NesPpu {
                 // Mask out the nametable selection bits
                 self.temporary_vram_address &= 0b1110011_11111111;
                 // Select the nametables based on the new values set to the ctrl register
-                self.temporary_vram_address = (data as u16 & 0b11) << 10
+                self.temporary_vram_address |= (data as u16 & 0b11) << 10
             },
             0x0001 => self.mask_flags.bits = data,
             0x0002 => warn!("Ignored attempted write to the ppu status flag. Data: {:2X}", data), // TODO: Check this behaviour
