@@ -220,7 +220,7 @@ impl NesPpu {
                                     if !self.sprite_evaluation_wrapped {
                                         if (self.secondary_sprite_evaluation_index as usize) < self.secondary_object_attribute_memory.len() {
                                             // Copy the first 8 sprites found on the scanline into the secondary oam
-                                            if self.scanline > sprite_y && self.scanline - sprite_y < sprite_height {
+                                            if self.scanline >= sprite_y && self.scanline - sprite_y < sprite_height {
                                                 // If the sprite overlaps with the scanline, copy its object attribute
                                                 // data into the secondary memory for evaluation on the next scanline
                                                 self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize..self.secondary_sprite_evaluation_index as usize + 4].clone_from_slice(
@@ -230,7 +230,7 @@ impl NesPpu {
                                             }
                                         } else if !self.status_flags.intersects(PpuStatus::SPRITE_OVERFLOW) {
                                             // Once 8 sprites have been found, we need to check if an overflow has occurred.
-                                            if self.scanline - sprite_y > 0 && self.scanline - sprite_y < sprite_height {
+                                            if self.scanline >= sprite_y && self.scanline - sprite_y < sprite_height {
                                                 // If there is another sprite on the scanline, set the overflow flag
                                                 self.status_flags.set(PpuStatus::SPRITE_OVERFLOW, true)
                                             }
@@ -324,7 +324,7 @@ impl NesPpu {
                                 }
                                 if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 {
                                     foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6) | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
-                                    foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits;
+                                    foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
                                 }
                             }
                             //
