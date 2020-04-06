@@ -321,8 +321,8 @@ impl NesPpu {
                             let mut foreground_priority = false;
 
                             if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
-                                background_pixel = (((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15);
-                                background_palette = (((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15);
+                                background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
+                                background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
                             }
 
                             for i in 0..self.sprite_x_offsets.len() {
@@ -347,7 +347,7 @@ impl NesPpu {
                                     }
                                 }
                             }
-                            let (pixel, palette) = NesPpu::colour_priority(foreground_pixel, foreground_palette, background_pixel as u8, background_palette as u8, foreground_priority);
+                            let (pixel, palette) = NesPpu::colour_priority(foreground_pixel, foreground_palette, background_pixel, background_palette, foreground_priority);
                             self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
                         }
 
@@ -708,12 +708,12 @@ impl NesPpu {
     /// Mirror palette addresses to show the universal background colour when necessary.
     /// Returns the index in the palette ram array that the address points to.
     fn apply_palette_mirroring(&self, address: u16) -> usize {
-        return if address < 0x3f11 && address & 0x03 == 0x0 {
+        return if address >= 0x3f10 && address & 0x03 == 0x0 {
             // Address 0x3f00 is the universal background colour, background palettes 0x3f01 through
             // 0x3f0d mirror the universal background colour with their last byte. This means
             // that a value of zero in the bitmap of a background sprite will always return the
             // universal background colour.
-            0x3f00
+            address & !0x10
         } else {
             address
         } as usize & 0x1f // Apply mirroring
@@ -737,13 +737,13 @@ impl NesPpu {
     }
 
     /// Function that determines whether the sprite or the background colour will be used for a pixel.
-    fn colour_priority(sprite_colour: u8, sprite_palette: u8, background_colour: u8, background_palette: u8, sprite_priority: bool) -> (u8, u8) {
-        return match (sprite_colour, background_colour, sprite_priority) {
-            (0x00, 0x00, _) => (background_colour, background_palette),
-            (0x00, 0x01..=0x03, _) => (background_colour, background_palette),
-            (0x01..=0x03, 0x00, _) => (sprite_colour, sprite_palette),
-            (0x01..=0x03, 0x01..=0x03, false) => (background_colour, background_palette),
-            (0x01..=0x03, 0x01..=0x03, true) => (sprite_colour, sprite_palette),
+    fn colour_priority(foreground_pixel: u8, foreground_palette: u8, background_pixel: u8, background_palette: u8, foreground_priority: bool) -> (u8, u8) {
+        return match (foreground_pixel, background_pixel, foreground_priority) {
+            (0x00, 0x00, _) => (0x00, 0x00),
+            (0x00, 0x01..=0x03, _) => (background_pixel, background_palette),
+            (0x01..=0x03, 0x00, _) => (foreground_pixel, foreground_palette),
+            (0x01..=0x03, 0x01..=0x03, false) => (background_pixel, background_palette),
+            (0x01..=0x03, 0x01..=0x03, true) => (foreground_pixel, foreground_palette),
             _ => panic!("Invalid colour values") // Consider unreachable!()
         };
     }
