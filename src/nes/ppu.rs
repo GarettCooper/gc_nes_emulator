@@ -226,6 +226,16 @@ impl NesPpu {
                                                 self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize..self.secondary_sprite_evaluation_index as usize + 4].clone_from_slice(
                                                     &self.object_attribute_memory[self.sprite_evaluation_index as usize..self.sprite_evaluation_index as usize + 4]
                                                 );
+
+                                                // This doesn't happen in the real PPU, but I am using
+                                                // the unused flags in the attribute byte to keep track
+                                                // of which sprite is sprite zero.
+                                                if self.secondary_sprite_evaluation_index == 0 {
+                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] |= SpriteAttribute::SPRITE_ZERO.bits
+                                                } else {
+                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] &= !SpriteAttribute::SPRITE_ZERO.bits
+                                                }
+
                                                 self.secondary_sprite_evaluation_index += 4;
                                             }
                                         } else if !self.status_flags.intersects(PpuStatus::SPRITE_OVERFLOW) {
@@ -308,29 +318,36 @@ impl NesPpu {
 
                             let mut foreground_pixel = 0x00;
                             let mut foreground_palette = 0x00;
+                            let mut foreground_priority = false;
 
                             if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
                                 background_pixel = (((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15);
                                 background_palette = (((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15);
                             }
 
-                            // TODO: Split into own function
-                            // TODO: Count backwards to handle sprite priority
                             for i in 0..self.sprite_x_offsets.len() {
                                 // Decrement all the sprite x offsets from the current pixel
 
                                 if self.sprite_x_offsets[i] > -0x8 {
                                     self.sprite_x_offsets[i] -= 1;
                                 }
-                                if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 {
+                                // If the x offset is in range and a higher priority sprite isn't already on this pixel
+                                if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
                                     foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6) | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
                                     foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
+                                    foreground_priority = !self.sprite_attributes[i].intersects(SpriteAttribute::PRIORITY);
+
+                                    if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
+                                        if self.sprite_attributes[i].intersects(SpriteAttribute::SPRITE_ZERO) && foreground_pixel > 0 && background_pixel > 0 {
+                                            // There are a couple edge cases where sprite zero hit does not occur
+                                            if !(self.cycle > 0 && self.cycle <= 8 && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE & PpuMask::BACKGROUND_LEFT_ENABLE)) && self.cycle != 256 {
+                                                self.status_flags.set(PpuStatus::SPRITE_0_HIT, true);
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            //
-                            let (pixel, palette) = NesPpu::colour_priority(foreground_pixel, foreground_palette, background_pixel as u8, background_palette as u8, false);
-                            // trace!("Background Pixel: {}, Background Palette: {}", background_pixel, background_palette);
-                            // trace!("Pixel: {}, Palette: {}", pixel, palette);
+                            let (pixel, palette) = NesPpu::colour_priority(foreground_pixel, foreground_palette, background_pixel as u8, background_palette as u8, foreground_priority);
                             self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
                         }
 
@@ -360,7 +377,9 @@ impl NesPpu {
                                 // Skip the garbage data after all the actual sprites have been loaded
                                 if sprite_y != 0xff {
                                     let sprite_pattern_id = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 1] as u16; // Cast here instead of later
+
                                     self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits_truncate(self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2]);
+
                                     self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16;
                                     let mut sprite_pattern_row = (self.scanline - sprite_y as u16);
                                     // If the vertical mirroring bit is set in the attribute byte
@@ -767,10 +786,16 @@ bitflags! {
 
 bitflags! {
     #[derive(Default)]
-    struct SpriteAttribute: u8 { // Labels from https://wiki.nesdev.com/w/index.php/PPU_registers
+    struct SpriteAttribute: u8 {
         const VERTICAL_MIRROR = 0b1000_0000;
         const HORIZONTAL_MIRROR = 0b0100_0000;
-        const PRIORITY = 0b0010_0000;// 1: Show background
+        /// So this is a little hack to keep track of which sprite is sprite zero. These bits are
+        /// unused in the real PPU, so I am going to re-purpose them so that I can indicate in
+        /// secondary OAM if a sprite is sprite zero. This is a workaround since I don't have access
+        /// to the sprites original positions in OAM, which is what determines if sprite zero has
+        /// been hit.
+        const SPRITE_ZERO = 0b0001_1100;
+        const PRIORITY = 0b0010_0000; // 1: Show background
         const PALETTE = 0b0000_0011;
     }
 }
