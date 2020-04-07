@@ -343,7 +343,7 @@ impl NesPpu {
                                     }
 
                                     let sprite_address: u16 = if !self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
-                                        (((self.ctrl_flags & PpuCtrl::NAMETABLE_SELECT).bits as u16) << 8) |
+                                        (((self.ctrl_flags & PpuCtrl::SPRITE_SELECT).bits as u16) << 8) |
                                             (sprite_pattern_id << 4) |
                                             sprite_pattern_row
                                     } else {
