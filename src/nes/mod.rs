@@ -2,7 +2,7 @@ extern crate emulator_6502;
 
 use emulator_6502::{Interface6502, MOS6502};
 use crate::cartridge::Cartridge;
-use crate::input::NesInput;
+use crate::input::{NesInput, NesInputDevice};
 use crate::nes::apu::NesApu;
 use crate::nes::ppu::NesPpu;
 
@@ -13,14 +13,14 @@ mod ppu;
 pub const NES_SCREEN_DIMENSIONS: usize = 256 * 240;
 
 /// Struct that represents the NES itself
-pub struct Nes<'a> {
+pub struct Nes {
     // NES Components-----------------------------------------------------------------------------------------------------------------
     /// The cpu of the NES
     ///
     /// The actual NES used a 2A03 which combined the cpu and apu functionality, but they are represented separately here
     cpu: MOS6502,
     /// The bus of the NES, which holds ownership of the other components
-    bus: Bus<'a>,
+    bus: Bus,
     // Additional Tracking Information------------------------------------------------------------------------------------------------
     /// The number of cycles that have been executed so far
     cycle_count: u64,
@@ -29,7 +29,7 @@ pub struct Nes<'a> {
 /// Struct that represents the NES components that are connected to the main bus.
 /// The primary reasons for this classes existence is to allow for reading and writing by the cpu
 /// after the NES has been decomposed.
-struct Bus<'a> {
+struct Bus {
     /// The cartridge loaded into the NES
     cartridge: Box<Cartridge>,
     /// The picture processing unit of the NES
@@ -39,9 +39,9 @@ struct Bus<'a> {
     /// The NES' two kilobytes of ram               
     ram: Box<[u8; 0x0800]>,
     /// The first input device connected to the NES
-    input_device_one: NesInput<'a>,
+    input_device_one: NesInput,
     /// The second input device connected to the NES
-    input_device_two: NesInput<'a>,
+    input_device_two: NesInput,
     /// The status of the OAM DMA process. When OAM DMA is activated the value is set to Some(DmaStatus)
     dma_status: Option<DmaStatus>,
 }
@@ -61,7 +61,7 @@ struct DmaStatus {
     dma_buffer: u8,
 }
 
-impl<'a> Nes<'a> {
+impl Nes {
     /// Creates a new NES instance with no connected controllers
     pub fn new(cartridge: Cartridge) -> Self {
         let mut bus = Bus {
@@ -134,14 +134,24 @@ impl<'a> Nes<'a> {
         return self.get_screen()
     }
 
-    /// Connect a controller to the first input port
-    pub fn connect_controller_one(&mut self, controller: NesInput<'a>) {
-        self.bus.input_device_one = controller;
+    /// Updates the state of the input device connected to the first port
+    pub fn update_controller_one(&mut self, input_state: Option<u8>) {
+        match (&mut self.bus.input_device_one, input_state) {
+            (NesInput::Disconnected, None) => {},
+            (NesInput::Connected(_), None) => self.bus.input_device_one = NesInput::Disconnected,
+            (NesInput::Disconnected, Some(state)) => self.bus.input_device_one = NesInput::Connected(NesInputDevice::new(state)),
+            (NesInput::Connected(ref mut device), Some(state)) => device.update_state(state),
+        }
     }
 
-    /// Connect a controller to the second input port
-    pub fn connect_controller_two(&mut self, controller: NesInput<'a>) {
-        self.bus.input_device_two = controller;
+    /// Updates the state of the input device connected to the first port
+    pub fn update_controller_two(&mut self, input_state: Option<u8>) {
+        match (&mut self.bus.input_device_two, input_state) {
+            (NesInput::Disconnected, None) => {},
+            (NesInput::Connected(_), None) => self.bus.input_device_two = NesInput::Disconnected,
+            (NesInput::Disconnected, Some(state)) => self.bus.input_device_two = NesInput::Connected(NesInputDevice::new(state)),
+            (NesInput::Connected(ref mut device), Some(state)) => device.update_state(state),
+        }
     }
 
     /// Gets the current state of the screen from the PPU's screen buffer
@@ -157,7 +167,8 @@ impl<'a> Nes<'a> {
     }
 }
 
-impl Bus<'_> {
+
+impl Bus {
     /// Resets the state of the console components on the bus
     fn reset(&mut self) {
         // TODO: Implement these
@@ -166,7 +177,7 @@ impl Bus<'_> {
     }
 }
 
-impl Interface6502 for Bus<'_> {
+impl Interface6502 for Bus {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff], // Addresses 0x0800-0x1fff mirror the 2KiB of ram
