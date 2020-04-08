@@ -1,9 +1,9 @@
 use crate::structopt::StructOpt;
 use gc_nes_emulator::cartridge::Cartridge;
 use gc_nes_emulator::nes::Nes;
-use minifb::{Window, Key, WindowOptions, Scale};
-use std::time::{Duration, Instant};
+use minifb::{Key, Scale, Window, WindowOptions};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 #[macro_use]
 extern crate log;
@@ -23,12 +23,23 @@ fn main() {
         8 => Scale::X8,
         16 => Scale::X16,
         32 => Scale::X32,
-        _ => Scale::X2
+        _ => Scale::X2,
     };
 
-    let mut window = Window::new(format!("gc_nes_emulator v{}", env!("CARGO_PKG_VERSION")).as_ref(), 256, 240, WindowOptions { scale, ..Default::default() }).expect("Error opening window");
+    let mut window = Window::new(
+        format!("gc_nes_emulator v{}", env!("CARGO_PKG_VERSION")).as_ref(),
+        256,
+        240,
+        WindowOptions { scale, ..Default::default() },
+    )
+    .expect("Error opening window");
 
-    info!("Starting {} by {}, version {}...", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_AUTHORS"), env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting {} by {}, version {}...",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_AUTHORS"),
+        env!("CARGO_PKG_VERSION")
+    );
     let cartridge = Cartridge::load_from_file(&arguments.file).expect("File read error"); // TODO: Present a message to the user instead of crashing
     let mut nes = Nes::new(cartridge);
     let buffer = nes.frame();
@@ -65,5 +76,5 @@ fn get_controller_one_state(window: &Window) -> u8 {
         (window.is_key_down(Key::W) as u8) << 4 |          // Up
         (window.is_key_down(Key::S) as u8) << 5 |          // Down
         (window.is_key_down(Key::A) as u8) << 6 |          // Left
-        (window.is_key_down(Key::D) as u8) << 7;           // Right
+        (window.is_key_down(Key::D) as u8) << 7; // Right
 }

@@ -48,12 +48,12 @@ pub struct Cartridge {
 impl Cartridge {
     /// Read from the cartridge's program ROM/RAM through the cartridge's mapper
     pub(crate) fn program_read(&self, address: u16) -> u8 {
-        return self.mapper.program_read(&self.program_rom, &self.program_ram, address)
+        return self.mapper.program_read(&self.program_rom, &self.program_ram, address);
     }
 
     /// Read from the cartridge's character ROM/RAM through the cartridge's mapper
     pub(crate) fn character_read(&self, address: u16) -> u8 {
-        return self.mapper.character_read(&self.character_ram, address)
+        return self.mapper.character_read(&self.character_ram, address);
     }
 
     /// Write to the cartridge's program RAM through the cartridge's mapper
@@ -176,12 +176,12 @@ pub(crate) mod test_utils {
             program_rom: Box::new([0]),
             program_ram: Box::new([0]),
             character_ram: Box::new([0]),
-        }
+        };
     }
 
     impl Default for Cartridge {
         fn default() -> Self {
-            return get_mock_cartridge(Default::default())
+            return get_mock_cartridge(Default::default());
         }
     }
 
@@ -201,11 +201,11 @@ pub(crate) mod test_utils {
 
     impl Mapper for MapperMock {
         fn program_read(&self, _program_rom: &[u8], _program_ram: &[u8], address: u16) -> u8 {
-            return (self.program_read_stub)(address, self.program_read_count)
+            return (self.program_read_stub)(address, self.program_read_count);
         }
 
         fn character_read(&self, _character_ram: &[u8], address: u16) -> u8 {
-            return (self.character_read_stub)(address, self.character_read_count)
+            return (self.character_read_stub)(address, self.character_read_count);
         }
 
         fn program_write(&mut self, _program_ram: &mut [u8], address: u16, data: u8) {
@@ -221,20 +221,19 @@ pub(crate) mod test_utils {
         }
     }
 
-
     impl Default for MapperMock {
         fn default() -> Self {
             Self {
                 program_read_count: 0,
-                program_read_stub: |_, _| { panic!("Unexpected call to program_read_stub!") },
+                program_read_stub: |_, _| panic!("Unexpected call to program_read_stub!"),
                 character_read_count: 0,
-                character_read_stub: |_, _| { panic!("Unexpected call to character_read_stub!") },
+                character_read_stub: |_, _| panic!("Unexpected call to character_read_stub!"),
                 program_write_count: 0,
-                program_write_stub: |_, _, _| { panic!("Unexpected call to program_write_stub!") },
+                program_write_stub: |_, _, _| panic!("Unexpected call to program_write_stub!"),
                 character_write_count: 0,
-                character_write_stub: |_, _, _| { panic!("Unexpected call to character_write_stub!") },
+                character_write_stub: |_, _, _| panic!("Unexpected call to character_write_stub!"),
                 get_mirroring_count: 0,
-                get_mirroring_stub: |_| { panic!("Unexpected call to get_mirroring_stub!") },
+                get_mirroring_stub: |_| panic!("Unexpected call to get_mirroring_stub!"),
             }
         }
     }

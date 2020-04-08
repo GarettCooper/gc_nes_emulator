@@ -1,5 +1,5 @@
-use crate::cartridge::{Cartridge, Mirroring};
 use super::emulator_6502::MOS6502;
+use crate::cartridge::{Cartridge, Mirroring};
 use bit_reverse::BitwiseReverse;
 
 /// The total number of scanlines in a frame.
@@ -97,7 +97,6 @@ pub(super) struct NesPpu {
     /// The sprite x offset array contains the distance between the leftmost pixel of a sprite and
     /// the pixel for the current cycle.
     sprite_x_offsets: [i16; 8],
-
 }
 
 impl NesPpu {
@@ -135,7 +134,7 @@ impl NesPpu {
             sprite_shifters_lo: [0; 8],
             sprite_shifters_hi: [0; 8],
             sprite_attributes: [SpriteAttribute::from_bits(0).unwrap(); 8],
-            sprite_x_offsets: [0; 8]
+            sprite_x_offsets: [0; 8],
         }
     }
 
@@ -145,7 +144,7 @@ impl NesPpu {
             MAX_SCANLINES | 0..=239 => {
                 match self.cycle {
                     // Idle cycle
-                    0 => {}, // TODO: Accurate PPU address bus value
+                    0 => {} // TODO: Accurate PPU address bus value
                     // Cycles for visible pixels
                     1..=256 | 321..=336 => {
                         // Move the shifters that store pixel information
@@ -163,22 +162,34 @@ impl NesPpu {
                                 self.reload_shifters();
                                 // Read the byte of the next pattern from the nametable
                                 self.nametable_id = self.vram_read(0x2000 | (self.current_vram_address & 0x0fff), cartridge);
-                            },
+                            }
                             // Read the byte from the attribute table containing palette information
                             3 => self.attribute_latch = self.read_attribute_table_byte(cartridge),
                             // Read the lo bits for the next 8 pixels from the pattern table.
                             // To do this, the bit set in the control flag which picks the first or
                             // second pattern table is combined with the pattern id in the nametable
                             // and the fine y scroll in the address.
-                            5 => self.pattern_latch_lo = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
-                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> FINE_Y_OFFSET), cartridge),
+                            5 => {
+                                self.pattern_latch_lo = self.vram_read(
+                                    ((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12)
+                                        | ((self.nametable_id as u16) << 4)
+                                        | (self.current_vram_address >> FINE_Y_OFFSET),
+                                    cartridge,
+                                )
+                            }
                             // Same as above, but offset by eight pixels
-                            7 => self.pattern_latch_hi = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
-                                                                            ((self.nametable_id as u16) << 4) | ((self.current_vram_address >> FINE_Y_OFFSET) + 8), cartridge),
+                            7 => {
+                                self.pattern_latch_hi = self.vram_read(
+                                    ((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12)
+                                        | ((self.nametable_id as u16) << 4)
+                                        | ((self.current_vram_address >> FINE_Y_OFFSET) + 8),
+                                    cartridge,
+                                )
+                            }
                             // Increment the coarse x value every eight cycles
                             0 => self.coarse_x_increment(),
                             // Do nothing otherwise
-                            _ => {},
+                            _ => {}
                         }
 
                         // Foreground --------------------------------------------------
@@ -194,7 +205,7 @@ impl NesPpu {
                                     self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize] = self.oam_read();
                                     self.secondary_sprite_evaluation_index += 1;
                                 }
-                            },
+                            }
                             // Remaining cycles in the visible scanline fill it back up again
                             65..=256 => {
                                 if self.cycle % 2 == 0 {
@@ -208,11 +219,7 @@ impl NesPpu {
                                     }
 
                                     let sprite_y = self.object_attribute_memory[self.sprite_evaluation_index as usize] as u16;
-                                    let sprite_height = if self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
-                                        16
-                                    } else {
-                                        8
-                                    };
+                                    let sprite_height = if self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) { 16 } else { 8 };
 
                                     // Prevent duplication of sprites in secondary OAM by ensuring the
                                     // evaluation doesn't continue after all the sprites in OAM have
@@ -223,17 +230,22 @@ impl NesPpu {
                                             if self.scanline >= sprite_y && self.scanline - sprite_y < sprite_height {
                                                 // If the sprite overlaps with the scanline, copy its object attribute
                                                 // data into the secondary memory for evaluation on the next scanline
-                                                self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize..self.secondary_sprite_evaluation_index as usize + 4].clone_from_slice(
-                                                    &self.object_attribute_memory[self.sprite_evaluation_index as usize..self.sprite_evaluation_index as usize + 4]
-                                                );
+                                                self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize
+                                                    ..self.secondary_sprite_evaluation_index as usize + 4]
+                                                    .clone_from_slice(
+                                                        &self.object_attribute_memory
+                                                            [self.sprite_evaluation_index as usize..self.sprite_evaluation_index as usize + 4],
+                                                    );
 
                                                 // This doesn't happen in the real PPU, but I am using
                                                 // the unused flags in the attribute byte to keep track
                                                 // of which sprite is sprite zero.
                                                 if self.secondary_sprite_evaluation_index == 0 {
-                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] |= SpriteAttribute::SPRITE_ZERO.bits
+                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] |=
+                                                        SpriteAttribute::SPRITE_ZERO.bits
                                                 } else {
-                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] &= !SpriteAttribute::SPRITE_ZERO.bits
+                                                    self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] &=
+                                                        !SpriteAttribute::SPRITE_ZERO.bits
                                                 }
 
                                                 self.secondary_sprite_evaluation_index += 4;
@@ -255,7 +267,7 @@ impl NesPpu {
                                     self.sprite_evaluation_index = temp_sprite_eval;
                                     self.sprite_evaluation_wrapped = self.sprite_evaluation_wrapped || temp_bool;
                                 }
-                            },
+                            }
                             _ => {}
                         }
 
@@ -272,8 +284,12 @@ impl NesPpu {
                             let mut foreground_priority = false;
 
                             if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
-                                background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
-                                background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14) | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
+                                background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
+                                    | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15))
+                                    as u8;
+                                background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
+                                    | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15))
+                                    as u8;
                             }
 
                             for i in 0..self.sprite_x_offsets.len() {
@@ -285,22 +301,37 @@ impl NesPpu {
 
                                 // If the x offset is in range and a higher priority sprite isn't already on this pixel
                                 if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
-                                    foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6) | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
+                                    foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6)
+                                        | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
                                     foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
                                     foreground_priority = !self.sprite_attributes[i].intersects(SpriteAttribute::PRIORITY);
 
                                     if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                                        if self.sprite_attributes[i].intersects(SpriteAttribute::SPRITE_ZERO) && foreground_pixel > 0 && background_pixel > 0 {
+                                        if self.sprite_attributes[i].intersects(SpriteAttribute::SPRITE_ZERO)
+                                            && foreground_pixel > 0
+                                            && background_pixel > 0
+                                        {
                                             // There are a couple edge cases where sprite zero hit does not occur
-                                            if !(self.cycle > 0 && self.cycle <= 8 && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE & PpuMask::BACKGROUND_LEFT_ENABLE)) && self.cycle != 256 {
+                                            if !(self.cycle > 0
+                                                && self.cycle <= 8
+                                                && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE & PpuMask::BACKGROUND_LEFT_ENABLE))
+                                                && self.cycle != 256
+                                            {
                                                 self.status_flags.set(PpuStatus::SPRITE_0_HIT, true);
                                             }
                                         }
                                     }
                                 }
                             }
-                            let (pixel, palette) = NesPpu::colour_priority(foreground_pixel, foreground_palette, background_pixel, background_palette, foreground_priority);
-                            self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
+                            let (pixel, palette) = NesPpu::colour_priority(
+                                foreground_pixel,
+                                foreground_palette,
+                                background_pixel,
+                                background_palette,
+                                foreground_priority,
+                            );
+                            self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] =
+                                NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
                         }
 
                         // Special Cases!
@@ -311,7 +342,7 @@ impl NesPpu {
                             // Increment the y address at the end of each visible scanline
                             self.y_increment()
                         }
-                    },
+                    }
                     257..=320 => {
                         // Perform the rest of sprite evaluation, loading the sprite data into shift
                         // registers for rendering.
@@ -328,12 +359,16 @@ impl NesPpu {
                                 let sprite_y = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize];
                                 // Skip the garbage data after all the actual sprites have been loaded
                                 if sprite_y != 0xff {
-                                    let sprite_pattern_id = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 1] as u16; // Cast here instead of later
+                                    let sprite_pattern_id =
+                                        self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 1] as u16; // Cast here instead of later
 
-                                    self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits_truncate(self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2]);
+                                    self.sprite_attributes[sprite_index] = SpriteAttribute::from_bits_truncate(
+                                        self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2],
+                                    );
 
                                     // Small workaround, add one to the x offset to account for the difference between cycles and x coordinates
-                                    self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16 + 1;
+                                    self.sprite_x_offsets[sprite_index] =
+                                        self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16 + 1;
                                     let mut sprite_pattern_row = self.scanline - sprite_y as u16;
                                     // If the vertical mirroring bit is set in the attribute byte
                                     if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::VERTICAL_MIRROR) {
@@ -343,16 +378,14 @@ impl NesPpu {
                                     }
 
                                     let sprite_address: u16 = if !self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
-                                        (((self.ctrl_flags & PpuCtrl::SPRITE_SELECT).bits as u16) << 8) |
-                                            (sprite_pattern_id << 4) |
-                                            sprite_pattern_row
+                                        (((self.ctrl_flags & PpuCtrl::SPRITE_SELECT).bits as u16) << 8)
+                                            | (sprite_pattern_id << 4)
+                                            | sprite_pattern_row
                                     } else {
                                         // For 16 pixel tall sprites, the pattern table is selected
                                         // based on the least significant bit of the pattern id instead
                                         // of the nametable select flag.
-                                        ((sprite_pattern_id & 0x01) << 12) |
-                                            ((sprite_pattern_id | 0x01) << 4) |
-                                            sprite_pattern_row
+                                        ((sprite_pattern_id & 0x01) << 12) | ((sprite_pattern_id | 0x01) << 4) | sprite_pattern_row
                                     };
 
                                     self.sprite_shifters_lo[sprite_index] = self.vram_read(sprite_address, cartridge);
@@ -365,7 +398,7 @@ impl NesPpu {
                                 }
 
                                 self.secondary_sprite_evaluation_index += 4;
-                            },
+                            }
                             _ => {}
                         }
 
@@ -374,36 +407,41 @@ impl NesPpu {
                             // Load the x information from the temporary vram address into the active vram address
                             (257, _) => {
                                 if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                                    self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK)) | (self.temporary_vram_address & (0x400 | COARSE_X_MASK));
+                                    self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK))
+                                        | (self.temporary_vram_address & (0x400 | COARSE_X_MASK));
                                 }
-                            },
+                            }
                             // Load the y information from the temporary vram address into the active vram address repeatedly
                             (280..=304, MAX_SCANLINES) => {
                                 if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                                    self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK)) | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK));
+                                    self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
+                                        | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK));
                                 }
                             }
                             _ => {}
                         }
-                    },                    // Final four cycles just make dummy reads
-                    c @ 337..=340 if c & 0x1 == 0 => { cartridge.character_read(0x00); }, // TODO: Read from the correct location
+                    } // Final four cycles just make dummy reads
+                    c @ 337..=340 if c & 0x1 == 0 => {
+                        cartridge.character_read(0x00);
+                    } // TODO: Read from the correct location
                     // Idle cycles to simulate two cycle read time
-                    337..=340 => {},
-                    _ => panic!("Invalid Cycle: {}", self.cycle) // TODO: Consider unreachable!()
+                    337..=340 => {}
+                    _ => panic!("Invalid Cycle: {}", self.cycle), // TODO: Consider unreachable!()
                 }
-            },
-            240 => {}, // Nothing happens on the first scanline off the screen
+            }
+            240 => {} // Nothing happens on the first scanline off the screen
             241 => {
-                if self.cycle == 1 { // The vertical blank flag is set on the second cycle of scanline 241
+                if self.cycle == 1 {
+                    // The vertical blank flag is set on the second cycle of scanline 241
                     self.status_flags.set(PpuStatus::VERTICAL_BLANK, true);
                     if self.ctrl_flags.intersects(PpuCtrl::NMI_ENABLE) {
                         // Trigger a non maskable interrupt on the CPU
                         cpu.non_maskable_interrupt_request();
                     }
                 }
-            },
-            242..=260 => {}, // Nothing continues to happen so that CPU can manipulate PPU freely
-            _ => panic!("Invalid Scanline: {}", self.scanline) // TODO: Consider unreachable!()
+            }
+            242..=260 => {}                                     // Nothing continues to happen so that CPU can manipulate PPU freely
+            _ => panic!("Invalid Scanline: {}", self.scanline), // TODO: Consider unreachable!()
         }
 
         // Increase the cycle count and rollover the scanline if necessary
@@ -413,12 +451,12 @@ impl NesPpu {
                 self.cycle = 0;
                 self.scanline = 0;
                 self.frame_count += 1;
-            },
+            }
             (MAX_CYCLES, _, _) => {
                 self.cycle = 0;
                 self.scanline += 1;
-            },
-            _ => self.cycle += 1
+            }
+            _ => self.cycle += 1,
         }
     }
 
@@ -449,7 +487,9 @@ impl NesPpu {
                 self.read_buffer = self.vram_read(self.current_vram_address, cartridge);
 
                 // *Except for reads from tha palette memory
-                if self.current_vram_address >= 0x3f00 { temp = self.read_buffer }
+                if self.current_vram_address >= 0x3f00 {
+                    temp = self.read_buffer
+                }
 
                 // Increment the address in the x or y direction depending on a ctrl flag
                 self.current_vram_address += if self.ctrl_flags.intersects(PpuCtrl::VRAM_INCREMENT) {
@@ -457,8 +497,8 @@ impl NesPpu {
                 } else {
                     0x01
                 };
-                return temp
-            },
+                return temp;
+            }
             _ => panic!("Invalid PPU Read Address"), // TODO: Consider unreachable!()
         }
     }
@@ -474,7 +514,7 @@ impl NesPpu {
                 self.temporary_vram_address &= 0b1110011_11111111;
                 // Select the nametables based on the new values set to the ctrl register
                 self.temporary_vram_address |= (data as u16 & 0b11) << 10
-            },
+            }
             0x0001 => self.mask_flags.bits = data,
             0x0002 => warn!("Ignored attempted write to the ppu status flag. Data: {:2X}", data), // TODO: Check this behaviour
             0x0003 => self.oam_address = data,
@@ -489,7 +529,7 @@ impl NesPpu {
                 } else {
                     0x01
                 }
-            },
+            }
             _ => warn!("Invalid PPU Write Address"), // TODO: Consider unreachable!()
         }
     }
@@ -501,7 +541,7 @@ impl NesPpu {
             0xff
         } else {
             self.object_attribute_memory[self.oam_address as usize]
-        }
+        };
     }
 
     /// Reads from the internal bus of the PPU
@@ -510,8 +550,8 @@ impl NesPpu {
             0x0000..=0x1fff => cartridge.character_read(address),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)],
             0x3f00..=0x3fff => self.palette_ram[self.apply_palette_mirroring(address)],
-            _ => panic!("Attempt to read from an invalid PPU bus address: 0x{:4X}!", address)
-        }
+            _ => panic!("Attempt to read from an invalid PPU bus address: 0x{:4X}!", address),
+        };
     }
 
     fn oam_write(&mut self, data: u8) {
@@ -605,12 +645,12 @@ impl NesPpu {
                         self.current_vram_address ^= 0x0800;
                         // Wrap around
                         self.current_vram_address &= !COARSE_Y_MASK;
-                    },
+                    }
                     // But if it's at 31, wrap it around without changing vertical nametables.
                     // This is to replicate specific NES behaviour
                     0x1f => self.current_vram_address &= !COARSE_Y_MASK,
                     //Otherwise, just increment coarse y
-                    _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET
+                    _ => self.current_vram_address += 0x1 << COARSE_Y_OFFSET,
                 }
             }
         }
@@ -620,18 +660,10 @@ impl NesPpu {
     fn reload_shifters(&mut self) {
         // Set all eight bits of the low bits attribute shifter to the least significant bit in the
         // attribute latch.
-        self.attribute_shifter_lo = (self.attribute_shifter_lo & 0xff00) | if self.attribute_latch & 0x1 == 1 {
-            0xff
-        } else {
-            0x00
-        };
+        self.attribute_shifter_lo = (self.attribute_shifter_lo & 0xff00) | if self.attribute_latch & 0x1 == 1 { 0xff } else { 0x00 };
         // Set all eight bits of the high bits attribute shifter to the second least significant bit
         // in the attribute latch.
-        self.attribute_shifter_hi = (self.attribute_shifter_hi & 0xff00) | if self.attribute_latch & 0x2 == 2 {
-            0xff
-        } else {
-            0x00
-        };
+        self.attribute_shifter_hi = (self.attribute_shifter_hi & 0xff00) | if self.attribute_latch & 0x2 == 2 { 0xff } else { 0x00 };
         // Set the bottom eight bits of the low pattern shifter to the bits of the low pattern latch
         self.pattern_shifter_lo = (self.pattern_shifter_lo & 0xff00) | self.pattern_latch_lo as u16;
         // Set the bottom eight bits of the high pattern shifter to the bits of the high pattern latch
@@ -644,18 +676,18 @@ impl NesPpu {
             0x0000..=0x1fff => cartridge.character_write(address, data),
             0x2000..=0x3eff => self.name_table[self.apply_name_table_mirroring(cartridge, address)] = data,
             0x3f00..=0x3fff => self.palette_ram[self.apply_palette_mirroring(address)] = data,
-            _ => panic!("Attempt to write to an invalid PPU bus address: 0x{:4X}!", address)
+            _ => panic!("Attempt to write to an invalid PPU bus address: 0x{:4X}!", address),
         }
     }
 
     /// Gets the screen buffer from the PPU.
     pub(super) fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
-        return &self.screen_buffer
+        return &self.screen_buffer;
     }
 
     /// Maps an address to a name table address by applying mirroring.
     fn apply_name_table_mirroring(&mut self, cartridge: &mut Cartridge, address: u16) -> usize {
-        return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
+        return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize;
     }
 
     /// Mirror palette addresses to show the universal background colour when necessary.
@@ -669,7 +701,8 @@ impl NesPpu {
             address & !0x10
         } else {
             address
-        } as usize & 0x1f // Apply mirroring
+        } as usize
+            & 0x1f; // Apply mirroring
     }
 
     /// Calculates the address of the attribute table byte for a location in the name table.
@@ -681,23 +714,31 @@ impl NesPpu {
         // Select the attribute byte in the y direction (top 3 bits of the y component moved into the correct position)
         attribute_address |= (self.current_vram_address & 0x380) >> 4;
         // Return the two bits of the attribute byte that refer to the correct quadrant
-        return self.vram_read(attribute_address, cartridge) >> (
-            // Shift the attribute byte right by four bits if we're selecting one of the bottom tiles
-            (((self.current_vram_address >> COARSE_Y_OFFSET) & 0x02) << 0x1) |
+        return self.vram_read(attribute_address, cartridge)
+            >> (
+                // Shift the attribute byte right by four bits if we're selecting one of the bottom tiles
+                (((self.current_vram_address >> COARSE_Y_OFFSET) & 0x02) << 0x1) |
                 // Shift the attribute byte right two bits we're selecting one of the right tiles
                 ((self.current_vram_address) & 0x02)
-        ) & 0x03; // Only return the last two bits
+            )
+            & 0x03; // Only return the last two bits
     }
 
     /// Function that determines whether the sprite or the background colour will be used for a pixel.
-    fn colour_priority(foreground_pixel: u8, foreground_palette: u8, background_pixel: u8, background_palette: u8, foreground_priority: bool) -> (u8, u8) {
+    fn colour_priority(
+        foreground_pixel: u8,
+        foreground_palette: u8,
+        background_pixel: u8,
+        background_palette: u8,
+        foreground_priority: bool,
+    ) -> (u8, u8) {
         return match (foreground_pixel, background_pixel, foreground_priority) {
             (0x00, 0x00, _) => (0x00, 0x00),
             (0x00, 0x01..=0x03, _) => (background_pixel, background_palette),
             (0x01..=0x03, 0x00, _) => (foreground_pixel, foreground_palette),
             (0x01..=0x03, 0x01..=0x03, false) => (background_pixel, background_palette),
             (0x01..=0x03, 0x01..=0x03, true) => (foreground_pixel, foreground_palette),
-            _ => panic!("Invalid colour values") // Consider unreachable!()
+            _ => panic!("Invalid colour values"), // Consider unreachable!()
         };
     }
 }
@@ -761,79 +802,19 @@ impl Default for PpuStatus {
 
 #[allow(clippy::unreadable_literal)] // Allow standard 6 character colour hex codes
 const NES_COLOUR_MAP: [u32; 0x40] = [
-    0x464646,
-    0x00065a,
-    0x000678,
-    0x020673,
-    0x35034c,
-    0x57000e,
-    0x5a0000,
-    0x410000,
-    0x120200,
-    0x001400,
-    0x001e00,
-    0x001e00,
-    0x001521,
-    0x000000,
-    0x000000,
-    0x000000,
-    0x9d9d9d,
-    0x004ab9,
-    0x0530e1,
-    0x5718da,
-    0x9f07a7,
-    0xcc0255,
-    0xcf0b00,
-    0xa42300,
-    0x5c3f00,
-    0x0b5800,
-    0x006600,
-    0x006713,
-    0x005e6e,
-    0x000000,
-    0x000000,
-    0x000000,
-    0xfeffff,
-    0x1f9eff,
-    0x5376ff,
-    0x9865ff,
-    0xfc67ff,
-    0xff6cb3,
-    0xff7466,
-    0xff8014,
-    0xc49a00,
-    0x71b300,
-    0x28c421,
-    0x00c874,
-    0x00bfd0,
-    0x2b2b2b,
-    0x000000,
-    0x000000,
-    0xfeffff,
-    0x9ed5ff,
-    0xafc0ff,
-    0xd0b8ff,
-    0xfebfff,
-    0xffc0e0,
-    0xffc3bd,
-    0xffca9c,
-    0xe7d58b,
-    0xc5df8e,
-    0xa6e6a3,
-    0x94e8c5,
-    0x92e4eb,
-    0xa7a7a7,
-    0x000000,
-    0x000000
+    0x464646, 0x00065a, 0x000678, 0x020673, 0x35034c, 0x57000e, 0x5a0000, 0x410000, 0x120200, 0x001400, 0x001e00, 0x001e00, 0x001521, 0x000000,
+    0x000000, 0x000000, 0x9d9d9d, 0x004ab9, 0x0530e1, 0x5718da, 0x9f07a7, 0xcc0255, 0xcf0b00, 0xa42300, 0x5c3f00, 0x0b5800, 0x006600, 0x006713,
+    0x005e6e, 0x000000, 0x000000, 0x000000, 0xfeffff, 0x1f9eff, 0x5376ff, 0x9865ff, 0xfc67ff, 0xff6cb3, 0xff7466, 0xff8014, 0xc49a00, 0x71b300,
+    0x28c421, 0x00c874, 0x00bfd0, 0x2b2b2b, 0x000000, 0x000000, 0xfeffff, 0x9ed5ff, 0xafc0ff, 0xd0b8ff, 0xfebfff, 0xffc0e0, 0xffc3bd, 0xffca9c,
+    0xe7d58b, 0xc5df8e, 0xa6e6a3, 0x94e8c5, 0x92e4eb, 0xa7a7a7, 0x000000, 0x000000,
 ];
-
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::cartridge::test_utils::*;
     use crate::nes::NES_SCREEN_DIMENSIONS;
-    use std::fmt::{Debug, Result, Formatter};
+    use std::fmt::{Debug, Formatter, Result};
     // TODO: Fix Expected/Actual positions
 
     fn test_colour_priority_sprite() {
@@ -1075,15 +1056,13 @@ mod test {
         };
 
         let mut cartridge = get_mock_cartridge(MapperMock {
-            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            get_mirroring_stub: |_| Mirroring::Horizontal,
             ..Default::default()
         });
 
         ppu_base.vram_write(0x23C0, 0x2, &mut cartridge);
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
         assert_eq!(ppu_expected, ppu_base)
@@ -1097,15 +1076,13 @@ mod test {
         };
 
         let mut cartridge = get_mock_cartridge(MapperMock {
-            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            get_mirroring_stub: |_| Mirroring::Horizontal,
             ..Default::default()
         });
 
         ppu_base.vram_write(0x23C7, 0x3 << 2, &mut cartridge);
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x3, ppu_base.read_attribute_table_byte(&mut cartridge));
         assert_eq!(ppu_expected, ppu_base)
@@ -1119,15 +1096,13 @@ mod test {
         };
 
         let mut cartridge = get_mock_cartridge(MapperMock {
-            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            get_mirroring_stub: |_| Mirroring::Horizontal,
             ..Default::default()
         });
 
         ppu_base.vram_write(0x23f8, 0x1 << 4, &mut cartridge);
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x1, ppu_base.read_attribute_table_byte(&mut cartridge));
         assert_eq!(ppu_expected, ppu_base)
@@ -1141,15 +1116,13 @@ mod test {
         };
 
         let mut cartridge = get_mock_cartridge(MapperMock {
-            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            get_mirroring_stub: |_| Mirroring::Horizontal,
             ..Default::default()
         });
 
         ppu_base.vram_write(0x23ff, 0x2 << 6, &mut cartridge);
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
         assert_eq!(ppu_expected, ppu_base)
@@ -1163,15 +1136,13 @@ mod test {
         };
 
         let mut cartridge = get_mock_cartridge(MapperMock {
-            get_mirroring_stub: |_| { Mirroring::Horizontal },
+            get_mirroring_stub: |_| Mirroring::Horizontal,
             ..Default::default()
         });
 
         ppu_base.vram_write(0x2bff, 0x2 << 6, &mut cartridge);
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x2, ppu_base.read_attribute_table_byte(&mut cartridge));
         assert_eq!(ppu_expected, ppu_base)
@@ -1243,9 +1214,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x20, ppu_base.oam_read());
         assert_eq!(ppu_base, ppu_expected);
@@ -1262,9 +1231,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0xff, ppu_base.oam_read());
         assert_eq!(ppu_base, ppu_expected);
@@ -1281,9 +1248,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let ppu_expected = NesPpu {
-            ..ppu_base.clone()
-        };
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x20, ppu_base.oam_read());
         assert_eq!(ppu_base, ppu_expected);
@@ -1364,32 +1329,32 @@ mod test {
 
     impl PartialEq for NesPpu {
         fn eq(&self, other: &Self) -> bool {
-            self.ctrl_flags == other.ctrl_flags &&
-                self.mask_flags == other.mask_flags &&
-                self.status_flags == other.status_flags &&
-                self.temporary_vram_address == other.temporary_vram_address &&
-                self.current_vram_address == other.current_vram_address &&
-                self.fine_x_scroll == other.fine_x_scroll &&
-                self.write_latch == other.write_latch &&
-                self.read_buffer == other.read_buffer &&
-                self.scanline == other.scanline &&
-                self.cycle == other.cycle &&
-                self.frame_count == other.frame_count &&
-                self.pattern_latch_lo == other.pattern_latch_lo &&
-                self.pattern_latch_hi == other.pattern_latch_hi &&
-                self.pattern_shifter_lo == other.pattern_shifter_lo &&
-                self.pattern_shifter_hi == other.pattern_shifter_hi &&
-                self.attribute_latch == other.attribute_latch &&
-                self.attribute_shifter_lo == other.attribute_shifter_lo &&
-                self.attribute_shifter_hi == other.attribute_shifter_hi &&
-                self.nametable_id == other.nametable_id &&
-                self.sprite_evaluation_index == other.sprite_evaluation_index &&
-                self.secondary_sprite_evaluation_index == other.secondary_sprite_evaluation_index &&
-                self.sprite_evaluation_wrapped == other.sprite_evaluation_wrapped &&
-                self.sprite_shifters_lo == other.sprite_shifters_lo &&
-                self.sprite_shifters_hi == other.sprite_shifters_hi &&
-                self.sprite_attributes == other.sprite_attributes &&
-                self.sprite_x_offsets == other.sprite_x_offsets
+            self.ctrl_flags == other.ctrl_flags
+                && self.mask_flags == other.mask_flags
+                && self.status_flags == other.status_flags
+                && self.temporary_vram_address == other.temporary_vram_address
+                && self.current_vram_address == other.current_vram_address
+                && self.fine_x_scroll == other.fine_x_scroll
+                && self.write_latch == other.write_latch
+                && self.read_buffer == other.read_buffer
+                && self.scanline == other.scanline
+                && self.cycle == other.cycle
+                && self.frame_count == other.frame_count
+                && self.pattern_latch_lo == other.pattern_latch_lo
+                && self.pattern_latch_hi == other.pattern_latch_hi
+                && self.pattern_shifter_lo == other.pattern_shifter_lo
+                && self.pattern_shifter_hi == other.pattern_shifter_hi
+                && self.attribute_latch == other.attribute_latch
+                && self.attribute_shifter_lo == other.attribute_shifter_lo
+                && self.attribute_shifter_hi == other.attribute_shifter_hi
+                && self.nametable_id == other.nametable_id
+                && self.sprite_evaluation_index == other.sprite_evaluation_index
+                && self.secondary_sprite_evaluation_index == other.secondary_sprite_evaluation_index
+                && self.sprite_evaluation_wrapped == other.sprite_evaluation_wrapped
+                && self.sprite_shifters_lo == other.sprite_shifters_lo
+                && self.sprite_shifters_hi == other.sprite_shifters_hi
+                && self.sprite_attributes == other.sprite_attributes
+                && self.sprite_x_offsets == other.sprite_x_offsets
             //TODO: Add additional fields
         }
     }

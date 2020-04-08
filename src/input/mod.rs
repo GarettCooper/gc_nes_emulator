@@ -23,7 +23,7 @@ impl NesInput {
     pub(crate) fn poll(&mut self, bus: u8) -> u8 {
         match self {
             NesInput::Disconnected => bus & 0xf4,
-            NesInput::Connected(controller) => controller.poll(bus)
+            NesInput::Connected(controller) => controller.poll(bus),
         }
     }
 }

@@ -9,5 +9,5 @@ extern crate simple_error;
 extern crate log;
 
 pub mod cartridge;
-pub mod nes;
 pub mod input;
+pub mod nes;

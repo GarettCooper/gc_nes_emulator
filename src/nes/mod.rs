@@ -1,10 +1,10 @@
 extern crate emulator_6502;
 
-use emulator_6502::{Interface6502, MOS6502};
 use crate::cartridge::Cartridge;
 use crate::input::{NesInput, NesInputDevice};
 use crate::nes::apu::NesApu;
 use crate::nes::ppu::NesPpu;
+use emulator_6502::{Interface6502, MOS6502};
 
 mod apu;
 mod ppu;
@@ -94,21 +94,37 @@ impl Nes {
                     self.cpu.cycle(&mut self.bus);
                     // DMA status may have been changed, copy it back
                     dma_status = self.bus.dma_status;
-                },
+                }
                 // DMA ENABLED ------------------------------------------------------------------------------------------------------------
                 // DMA can only start on an even clock cycle
                 (c, Some(DmaStatus { dma_wait: wait @ true, .. })) if c % 2 == 1 => {
                     trace!("DMA Initiated on cycle: {}!", self.cycle_count);
                     *wait = false;
-                },
+                }
                 // DMA must wait a clock cycle for reads to be resolved
                 (_, Some(DmaStatus { dma_wait: true, .. })) => (),
                 // DMA reads from memory on even clock cycles
-                (c, Some(DmaStatus { dma_wait: false, dma_start_address, dma_count, dma_buffer })) if c % 2 == 0 => {
+                (
+                    c,
+                    Some(DmaStatus {
+                        dma_wait: false,
+                        dma_start_address,
+                        dma_count,
+                        dma_buffer,
+                    }),
+                ) if c % 2 == 0 => {
                     *dma_buffer = self.bus.read(*dma_start_address + *dma_count as u16);
                 }
                 // And writes to OAM on odd clock cycles
-                (_, Some(DmaStatus { dma_wait: false, dma_count, dma_buffer, .. })) => {
+                (
+                    _,
+                    Some(DmaStatus {
+                        dma_wait: false,
+                        dma_count,
+                        dma_buffer,
+                        ..
+                    }),
+                ) => {
                     self.bus.ppu.oam_dma_write(*dma_count, *dma_buffer);
                     *dma_count = dma_count.wrapping_add(1);
                     // When the count has wrapped around, the DMA is over
@@ -131,13 +147,13 @@ impl Nes {
             self.cycle();
             //trace!("Cycle Count: {}", self.cycle_count)
         }
-        return self.get_screen()
+        return self.get_screen();
     }
 
     /// Updates the state of the input device connected to the first port
     pub fn update_controller_one(&mut self, input_state: Option<u8>) {
         match (&mut self.bus.input_device_one, input_state) {
-            (NesInput::Disconnected, None) => {},
+            (NesInput::Disconnected, None) => {}
             (NesInput::Connected(_), None) => self.bus.input_device_one = NesInput::Disconnected,
             (NesInput::Disconnected, Some(state)) => self.bus.input_device_one = NesInput::Connected(NesInputDevice::new(state)),
             (NesInput::Connected(ref mut device), Some(state)) => device.update_state(state),
@@ -147,7 +163,7 @@ impl Nes {
     /// Updates the state of the input device connected to the first port
     pub fn update_controller_two(&mut self, input_state: Option<u8>) {
         match (&mut self.bus.input_device_two, input_state) {
-            (NesInput::Disconnected, None) => {},
+            (NesInput::Disconnected, None) => {}
             (NesInput::Connected(_), None) => self.bus.input_device_two = NesInput::Disconnected,
             (NesInput::Disconnected, Some(state)) => self.bus.input_device_two = NesInput::Connected(NesInputDevice::new(state)),
             (NesInput::Connected(ref mut device), Some(state)) => device.update_state(state),
@@ -167,7 +183,6 @@ impl Nes {
     }
 }
 
-
 impl Bus {
     /// Resets the state of the console components on the bus
     fn reset(&mut self) {
@@ -183,8 +198,8 @@ impl Interface6502 for Bus {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff], // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.read(&mut self.cartridge, address), // Mirroring will be done by the ppu
             0x4000..=0x4015 => unimplemented!(),                        // self.apu.read(address)
-            0x4016 => self.input_device_one.poll(0x00),            // Read one bit from the first controller TODO: Open Bus Behaviour
-            0x4017 => self.input_device_two.poll(0x00),            // Read one bit from the second controller
+            0x4016 => self.input_device_one.poll(0x00),                 // Read one bit from the first controller TODO: Open Bus Behaviour
+            0x4017 => self.input_device_two.poll(0x00),                 // Read one bit from the second controller
             0x4018..=0x401f => unimplemented!(),                        // Usually disabled on the nes TODO: Decide how to handle these
             0x4020..=0xffff => self.cartridge.program_read(address),    // Addresses above 0x4020 read from the cartridge
         }
@@ -192,23 +207,23 @@ impl Interface6502 for Bus {
 
     fn write(&mut self, address: u16, data: u8) {
         match address {
-            0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff] = data,     // Addresses 0x0800-0x1fff mirror the 2KiB of ram
+            0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff] = data, // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.write(&mut self.cartridge, address, data), // Mirroring will be done by the ppu
-            0x4000..=0x4013 => warn!("APU Write Unimplemented"),                                   // self.apu.write(address, data)
-            0x4014 => self.dma_status = Some(DmaStatus::new(data)),          // Begins the OAM DMA operation at the data page
+            0x4000..=0x4013 => warn!("APU Write Unimplemented"),               // self.apu.write(address, data)
+            0x4014 => self.dma_status = Some(DmaStatus::new(data)),            // Begins the OAM DMA operation at the data page
             0x4015 => warn!("APU Write Unimplemented"),
             0x4016 => {
-                self.input_device_one.latch(data);                                  // Set the shift register reload latch on the both controllers
+                self.input_device_one.latch(data); // Set the shift register reload latch on the both controllers
                 self.input_device_two.latch(data);
-            },
-            0x4017 => warn!("APU Write Unimplemented"),                 // Writing to the second controller address is undefined
-            0x4018..=0x401f => unimplemented!(),                                   // Usually disabled on the nes
-            0x4020..=0xffff => self.cartridge.program_write(address, data),        // Addresses above 0x4020 write to the cartridge
+            }
+            0x4017 => warn!("APU Write Unimplemented"), // Writing to the second controller address is undefined
+            0x4018..=0x401f => unimplemented!(),        // Usually disabled on the nes
+            0x4020..=0xffff => self.cartridge.program_write(address, data), // Addresses above 0x4020 write to the cartridge
         }
     }
 }
 
-impl DmaStatus{
+impl DmaStatus {
     /// Create a new DmaStatus instance
     fn new(page: u8) -> Self {
         DmaStatus {
