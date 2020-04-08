@@ -247,7 +247,7 @@ impl NesPpu {
     }
 
     /// Loads a background tile into the latches over the course of eight cycles,
-    /// then loads them into the shifters.
+    /// then loads the latches into the background shifters.
     fn select_next_background_tile(&mut self, cartridge: &mut Cartridge) {
         match self.cycle % 8 {
             1 => {
@@ -834,10 +834,6 @@ mod test {
     use std::fmt::{Debug, Formatter, Result};
     // TODO: Fix Expected/Actual positions
 
-    fn test_colour_priority_sprite() {
-        assert_eq!(0x400, 0x1 << 10)
-    }
-
     #[test]
     fn test_vram_address_first_write() {
         let mut ppu_base = NesPpu {
@@ -1190,7 +1186,7 @@ mod test {
         };
 
         ppu_base.reload_shifters();
-        assert_eq!(ppu_base, ppu_expected)
+        assert_eq!(ppu_expected, ppu_base)
     }
 
     #[test]
@@ -1218,7 +1214,7 @@ mod test {
         };
 
         ppu_base.reload_shifters();
-        assert_eq!(ppu_base, ppu_expected)
+        assert_eq!(ppu_expected, ppu_base)
     }
 
     #[test]
@@ -1234,7 +1230,7 @@ mod test {
         let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x20, ppu_base.oam_read());
-        assert_eq!(ppu_base, ppu_expected);
+        assert_eq!(ppu_expected, ppu_base);
     }
 
     #[test]
@@ -1251,7 +1247,7 @@ mod test {
         let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0xff, ppu_base.oam_read());
-        assert_eq!(ppu_base, ppu_expected);
+        assert_eq!(ppu_expected, ppu_base);
     }
 
     #[test]
@@ -1268,7 +1264,7 @@ mod test {
         let ppu_expected = NesPpu { ..ppu_base.clone() };
 
         assert_eq!(0x20, ppu_base.oam_read());
-        assert_eq!(ppu_base, ppu_expected);
+        assert_eq!(ppu_expected, ppu_base);
     }
 
     impl Default for NesPpu {
