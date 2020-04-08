@@ -162,7 +162,7 @@ impl NesPpu {
                                 // Load the shifters from the latches
                                 self.reload_shifters();
                                 // Read the byte of the next pattern from the nametable
-                                self.nametable_id = self.vram_read((0x2000 | self.current_vram_address & 0x0fff), cartridge);
+                                self.nametable_id = self.vram_read(0x2000 | (self.current_vram_address & 0x0fff), cartridge);
                             },
                             // Read the byte from the attribute table containing palette information
                             3 => self.attribute_latch = self.read_attribute_table_byte(cartridge),
@@ -174,7 +174,7 @@ impl NesPpu {
                                                                             ((self.nametable_id as u16) << 4) | (self.current_vram_address >> FINE_Y_OFFSET), cartridge),
                             // Same as above, but offset by eight pixels
                             7 => self.pattern_latch_hi = self.vram_read(((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12) |
-                                                                            ((self.nametable_id as u16) << 4) | (self.current_vram_address >> FINE_Y_OFFSET) + 8, cartridge),
+                                                                            ((self.nametable_id as u16) << 4) | ((self.current_vram_address >> FINE_Y_OFFSET) + 8), cartridge),
                             // Increment the coarse x value every eight cycles
                             0 => self.coarse_x_increment(),
                             // Do nothing otherwise
@@ -317,7 +317,7 @@ impl NesPpu {
                         // registers for rendering.
                         match self.cycle % 8 {
                             // The real PPU does this over eight cycles, but for the time being
-                            // but I'm  going to do it all in one for simplicity.
+                            // I'm  going to do it all in one for simplicity.
                             1 => {
                                 // Reset on the first cycle
                                 if self.cycle == 257 {
@@ -334,7 +334,7 @@ impl NesPpu {
 
                                     // Small workaround, add one to the x offset to account for the difference between cycles and x coordinates
                                     self.sprite_x_offsets[sprite_index] = self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 3] as i16 + 1;
-                                    let mut sprite_pattern_row = (self.scanline - sprite_y as u16);
+                                    let mut sprite_pattern_row = self.scanline - sprite_y as u16;
                                     // If the vertical mirroring bit is set in the attribute byte
                                     if self.sprite_attributes[sprite_index].intersects(SpriteAttribute::VERTICAL_MIRROR) {
                                         // In case of a 16 pixel tall sprite, make sure only the
@@ -1081,7 +1081,7 @@ mod test {
 
         ppu_base.vram_write(0x23C0, 0x2, &mut cartridge);
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1103,7 +1103,7 @@ mod test {
 
         ppu_base.vram_write(0x23C7, 0x3 << 2, &mut cartridge);
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1125,7 +1125,7 @@ mod test {
 
         ppu_base.vram_write(0x23f8, 0x1 << 4, &mut cartridge);
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1147,7 +1147,7 @@ mod test {
 
         ppu_base.vram_write(0x23ff, 0x2 << 6, &mut cartridge);
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1169,7 +1169,7 @@ mod test {
 
         ppu_base.vram_write(0x2bff, 0x2 << 6, &mut cartridge);
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1190,7 +1190,7 @@ mod test {
             ..Default::default()
         };
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             attribute_latch: 0b01,
             pattern_latch_lo: 0xcf,
             pattern_latch_hi: 0x4a,
@@ -1218,7 +1218,7 @@ mod test {
             ..Default::default()
         };
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             attribute_latch: 0b10,
             pattern_latch_lo: 0x91,
             pattern_latch_hi: 0xaa,
@@ -1243,7 +1243,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1262,7 +1262,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1281,7 +1281,7 @@ mod test {
 
         ppu_base.object_attribute_memory[ppu_base.oam_address as usize] = 0x20;
 
-        let mut ppu_expected = NesPpu {
+        let ppu_expected = NesPpu {
             ..ppu_base.clone()
         };
 
@@ -1391,10 +1391,6 @@ mod test {
                 self.sprite_attributes == other.sprite_attributes &&
                 self.sprite_x_offsets == other.sprite_x_offsets
             //TODO: Add additional fields
-        }
-
-        fn ne(&self, other: &Self) -> bool {
-            !self.eq(other)
         }
     }
 }

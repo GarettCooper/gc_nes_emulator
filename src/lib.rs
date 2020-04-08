@@ -1,4 +1,5 @@
 #![allow(clippy::needless_return)] // I prefer clarity of return
+#![allow(clippy::verbose_bit_mask)] // For consistency in bit mask usage
 
 #[macro_use]
 extern crate bitflags;

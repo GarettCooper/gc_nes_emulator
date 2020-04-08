@@ -200,23 +200,23 @@ pub(crate) mod test_utils {
     }
 
     impl Mapper for MapperMock {
-        fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
+        fn program_read(&self, _program_rom: &[u8], _program_ram: &[u8], address: u16) -> u8 {
             return (self.program_read_stub)(address, self.program_read_count)
         }
 
-        fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
+        fn character_read(&self, _character_ram: &[u8], address: u16) -> u8 {
             return (self.character_read_stub)(address, self.character_read_count)
         }
 
-        fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
+        fn program_write(&mut self, _program_ram: &mut [u8], address: u16, data: u8) {
             (self.program_write_stub)(address, data, self.program_write_count)
         }
 
-        fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
+        fn character_write(&mut self, _character_ram: &mut [u8], address: u16, data: u8) {
             (self.character_write_stub)(address, data, self.character_write_count)
         }
 
-        fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring {
+        fn get_mirroring(&mut self, _mirroring: Mirroring) -> Mirroring {
             (self.get_mirroring_stub)(self.get_mirroring_count)
         }
     }

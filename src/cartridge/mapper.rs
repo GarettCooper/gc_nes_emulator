@@ -37,7 +37,7 @@ impl Mapper for Mapper000 {
     fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
         match address {
             0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
-            _ => panic!("Mapper000::program_write called with invalid address 0x{:4X}", address),
+            _ => warn!("Mapper000::program_write called with invalid address 0x{:4X}", address),
         }
     }
 

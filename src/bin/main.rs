@@ -3,7 +3,7 @@ use gc_nes_emulator::cartridge::Cartridge;
 use gc_nes_emulator::nes::Nes;
 use minifb::{Window, Key, WindowOptions, Scale};
 use std::time::{Duration, Instant};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[macro_use]
 extern crate log;
@@ -54,6 +54,7 @@ pub struct Arguments {
 }
 
 /// Get the state of controller one as a input state byte
+#[allow(clippy::needless_return)]
 fn get_controller_one_state(window: &Window) -> u8 {
     // Get the appropriate controller state byte from the keys
     // TODO: Make these re-bindable
