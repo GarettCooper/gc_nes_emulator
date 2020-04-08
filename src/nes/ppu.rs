@@ -287,6 +287,7 @@ impl NesPpu {
                                 background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
                                     | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15))
                                     as u8;
+
                                 background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
                                     | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15))
                                     as u8;
@@ -300,12 +301,18 @@ impl NesPpu {
                                 }
 
                                 // If the x offset is in range and a higher priority sprite isn't already on this pixel
-                                if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
+                                if self.sprite_x_offsets[i] <= 0
+                                    && self.sprite_x_offsets[i] > -0x8
+                                    && foreground_pixel == 0x00
+                                    && self.mask_flags.intersects(PpuMask::SPRITE_ENABLE)
+                                {
                                     foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6)
                                         | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
+
                                     foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
                                     foreground_priority = !self.sprite_attributes[i].intersects(SpriteAttribute::PRIORITY);
 
+                                    // Check for Sprite Zero hit
                                     if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
                                         if self.sprite_attributes[i].intersects(SpriteAttribute::SPRITE_ZERO)
                                             && foreground_pixel > 0
