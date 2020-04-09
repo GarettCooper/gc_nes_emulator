@@ -155,7 +155,6 @@ impl NesPpu {
                             self.pattern_shifter_hi <<= 1;
                         }
 
-                        // Background --------------------------------------------------
                         self.select_next_background_tile(cartridge);
 
                         self.perform_sprite_evaluation();
@@ -338,7 +337,7 @@ impl NesPpu {
                                 // This doesn't happen in the real PPU, but I am using
                                 // the unused flags in the attribute byte to keep track
                                 // of which sprite is sprite zero.
-                                if self.secondary_sprite_evaluation_index == 0 {
+                                if self.sprite_evaluation_index == 0 {
                                     self.secondary_object_attribute_memory[self.secondary_sprite_evaluation_index as usize + 2] |=
                                         SpriteAttribute::SPRITE_ZERO.bits
                                 } else {
@@ -436,16 +435,14 @@ impl NesPpu {
             }
 
             // If the x offset is in range and a higher priority sprite isn't already on this pixel
-            if self.sprite_x_offsets[i] <= 0
-                && self.sprite_x_offsets[i] > -0x8
-                && foreground_pixel == 0x00
-                && self.mask_flags.intersects(PpuMask::SPRITE_ENABLE)
-            {
-                foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6)
-                    | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
+            if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
+                if self.mask_flags.intersects(PpuMask::SPRITE_ENABLE) {
+                    foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6)
+                        | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
 
-                foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
-                foreground_priority = !self.sprite_attributes[i].intersects(SpriteAttribute::PRIORITY);
+                    foreground_palette = (self.sprite_attributes[i] & SpriteAttribute::PALETTE).bits + 0x04;
+                    foreground_priority = !self.sprite_attributes[i].intersects(SpriteAttribute::PRIORITY);
+                }
 
                 // Check for Sprite Zero hit
                 if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE)
@@ -455,13 +452,14 @@ impl NesPpu {
                     // There are a couple edge cases where sprite zero hit does not occur
                     && !(self.cycle > 0
                     && self.cycle <= 8
-                    && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE & PpuMask::BACKGROUND_LEFT_ENABLE))
+                    && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE | PpuMask::BACKGROUND_LEFT_ENABLE))
                     && self.cycle != 256
                 {
                     self.status_flags.set(PpuStatus::SPRITE_0_HIT, true);
                 }
             }
         }
+
         // Determine if the background or foreground pixel takes priority
         let (pixel, palette) = NesPpu::colour_priority(
             foreground_pixel,
