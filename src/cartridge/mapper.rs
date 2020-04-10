@@ -24,8 +24,24 @@ pub(super) struct Mapper000 {}
 impl Mapper for Mapper000 {
     fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
         match address {
-            0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)],
-            0x8000..=0xffff => program_rom[usize::from(address - 0x8000) % program_rom.len()],
+            0x0000..=0x5fff => {
+                warn!("Mapper000 read from {:04X}", address);
+                return 0x00;
+            }
+            0x6000..=0x7fff => {
+                if program_ram.len() == 0 {
+                    0x00
+                } else {
+                    program_ram[usize::from(address - 0x6000) % program_ram.len()]
+                }
+            }
+            0x8000..=0xffff => {
+                if program_rom.len() == 0 {
+                    0x00
+                } else {
+                    program_rom[usize::from(address - 0x8000) % program_rom.len()]
+                }
+            }
             _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
         }
     }

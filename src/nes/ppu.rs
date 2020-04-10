@@ -498,8 +498,14 @@ impl NesPpu {
     pub fn read(&mut self, cartridge: &mut Cartridge, address: u16) -> u8 {
         match address & 0x07 {
             // Mirroring first 3 bits
-            0x0000 => panic!("Attempting to read from ppu control flag"), // TODO: Check this behaviour
-            0x0001 => panic!("Attempting to read from ppu mask flag"),    // TODO: Check this behaviour
+            0x0000 => {
+                warn!("Attempting to read from ppu control flag");
+                return 0x00; // TODO: Check this behaviour
+            }
+            0x0001 => {
+                warn!("Attempting to read from ppu mask flag");
+                return 0x00; // TODO: Check this behaviour
+            }
             0x0002 => {
                 // When the value of the status flag is read, the bottom values retain whatever was last
                 // on the PPU bus

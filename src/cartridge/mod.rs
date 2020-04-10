@@ -14,26 +14,6 @@ const IDENTIFICATION_STRING: [u8; 4] = [0x4e, 0x45, 0x53, 0x1a];
 const PROGRAM_ROM_BANK_SIZE: usize = 16 * 1024; // 16 KiB
 const CHARACTER_ROM_BANK_SIZE: usize = 8 * 1024; // 8 KiB
 
-/// Returns the number of bytes of program rom for NES 2.0 or iNes format as a usize
-/// Broken into its own function for ease of unit testing
-fn calculate_rom_size(least_significant_byte: u8, most_significant_byte: u8, bank_size: usize, nes20: bool) -> Result<usize, Box<dyn Error>> {
-    if nes20 && most_significant_byte == 0x0f {
-        // In the NES 2.0 format an exponent multiplier format can be used
-        let (size, overflow) = 2usize.pow(u32::from(least_significant_byte >> 2)).overflowing_mul(usize::from(least_significant_byte & 0x03) * 2 + 1);
-        if overflow {
-            bail!(".nes file memory size exceeded the maximum addressable range of the platform: {} bytes", usize::max_value())
-        }
-        return Ok(size);
-    } else {
-        // For other cases program rom size is just the value of the lsb and msb combined times 16 KiB
-        let mut banks = usize::from(least_significant_byte);
-        if nes20 {
-            banks |= usize::from(most_significant_byte) << 8
-        }
-        return Ok(banks * bank_size);
-    }
-}
-
 /// Type representing a Cartridge that can be loaded by the emulator, created by the
 pub struct Cartridge {
     mapper: Box<dyn Mapper>,
@@ -97,7 +77,9 @@ impl Cartridge {
 
             // Get a mapper based on the four mapper identification fragments in the 6th, 7th, and 8th bytes of the header, along with a submapper
             let mapper = mapper::get_mapper(
-                u16::from(header[8] & 0x0f) << 8 | u16::from(header[7] & HeaderFlags7::MAPPER_HI.bits) | u16::from(header[6] & HeaderFlags6::MAPPER_LO.bits) >> 4,
+                u16::from(header[8] & 0x0f) << 8
+                    | u16::from(header[7] & HeaderFlags7::MAPPER_HI.bits)
+                    | u16::from(header[6] & HeaderFlags6::MAPPER_LO.bits) >> 4,
                 (header[8] & 0xf0) >> 4,
             )?;
 
@@ -110,6 +92,9 @@ impl Cartridge {
             let program_rom_size = calculate_rom_size(header[4], header[9] & 0x0f, PROGRAM_ROM_BANK_SIZE, nes2)?;
             debug!("Allocating {} bytes for program ROM", program_rom_size);
 
+            let program_ram_size = calculate_ram_size(header[10], 0);
+            debug!("Allocating {} bytes for program RAM", program_rom_size);
+
             let character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes2)?;
             debug!("Allocating {} bytes for character ROM", character_rom_size);
 
@@ -118,7 +103,7 @@ impl Cartridge {
                 mirroring,
                 trainer_data: Box::new([0; 512]),
                 program_rom: vec![0; program_rom_size].into_boxed_slice(),
-                program_ram: Box::new([]), // TODO: Empty initialization until I implement this
+                program_ram: vec![0; program_ram_size].into_boxed_slice(),
                 character_ram: vec![0; character_rom_size].into_boxed_slice(),
             };
 
@@ -136,6 +121,38 @@ impl Cartridge {
             bail!("File format is invalid!");
         }
     }
+}
+
+/// Returns the number of bytes of program rom for NES 2.0 or iNes format as a usize
+/// Broken into its own function for ease of testing
+fn calculate_rom_size(least_significant_byte: u8, most_significant_byte: u8, bank_size: usize, nes20: bool) -> Result<usize, Box<dyn Error>> {
+    if nes20 && most_significant_byte == 0x0f {
+        // In the NES 2.0 format an exponent multiplier format can be used
+        let (size, overflow) = 2usize
+            .pow(u32::from(least_significant_byte >> 2))
+            .overflowing_mul(usize::from(least_significant_byte & 0x03) * 2 + 1);
+        if overflow {
+            bail!(
+                ".nes file memory size exceeded the maximum addressable range of the platform: {} bytes",
+                usize::max_value()
+            )
+        }
+        return Ok(size);
+    } else {
+        // For other cases program rom size is just the value of the lsb and msb combined times 16 KiB
+        let mut banks = usize::from(least_significant_byte);
+        if nes20 {
+            banks |= usize::from(most_significant_byte) << 8
+        }
+        return Ok(banks * bank_size);
+    }
+}
+
+/// Returns the number of bytes of RAM in a NES 2.0 file
+/// Broken into its own function for ease of testing
+fn calculate_ram_size(ram_byte: u8, ram_bits_offset: u8) -> usize {
+    let shift_count = ((ram_byte >> ram_bits_offset) & 0x0f) as usize;
+    return if shift_count == 0 { 0 } else { 64 << shift_count };
 }
 
 bitflags! {
