@@ -186,8 +186,7 @@ impl Nes {
 impl Bus {
     /// Resets the state of the console components on the bus
     fn reset(&mut self) {
-        // TODO: Implement these
-        // self.ppu.reset();
+        self.ppu.reset();
         // self.apu.reset();
     }
 }

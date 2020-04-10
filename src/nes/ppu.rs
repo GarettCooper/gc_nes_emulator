@@ -777,6 +777,19 @@ impl NesPpu {
             _ => panic!("Invalid colour values"), // Consider unreachable!()
         };
     }
+
+    /// Resets the state of the PPU
+    pub(super) fn reset(&mut self) {
+        self.ctrl_flags = Default::default();
+        self.mask_flags = Default::default();
+        self.status_flags = self.status_flags & PpuStatus::VERTICAL_BLANK;
+        self.write_latch = false;
+        self.read_buffer = 0x00;
+        self.cycle = 0;
+        self.scanline = 0;
+        self.fine_x_scroll = 0x00;
+        self.temporary_vram_address = 0x00;
+    }
 }
 
 bitflags! {
