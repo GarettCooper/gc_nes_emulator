@@ -272,9 +272,10 @@ impl NesPpu {
             // Same as above, but offset by eight pixels
             7 => {
                 self.pattern_latch_hi = self.vram_read(
-                    ((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12)
+                    (((self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) as u16) << 12)
                         | ((self.nametable_id as u16) << 4)
-                        | ((self.current_vram_address >> FINE_Y_OFFSET) + 8),
+                        | (self.current_vram_address >> FINE_Y_OFFSET))
+                        + 8,
                     cartridge,
                 )
             }
@@ -413,20 +414,47 @@ impl NesPpu {
 
     /// Draws a 32 bit RGB value to the screen buffer based on the background and foreground bit shifters
     fn draw_pixel(&mut self, cartridge: &mut Cartridge) {
+        let (background_pixel, background_palette) = self.calculate_background_pixel();
+
+        let (foreground_pixel, foreground_palette, foreground_priority) = self.calculate_foreground_pixel(background_pixel);
+
+        // Determine if the background or foreground pixel takes priority
+        let (pixel, palette) = NesPpu::colour_priority(
+            foreground_pixel,
+            foreground_palette,
+            background_pixel,
+            background_palette,
+            foreground_priority,
+        );
+        self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] =
+            NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
+    }
+
+    /// Calculates that background pixel and palette based on the shifters
+    fn calculate_background_pixel(&mut self) -> (u8, u8) {
         let mut background_pixel = 0x00;
         let mut background_palette = 0x00;
 
-        let mut foreground_pixel = 0x00;
-        let mut foreground_palette = 0x00;
-        let mut foreground_priority = false;
-
-        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE) {
+        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE)
+            && (!(self.cycle > 0 && self.cycle <= 8) || self.mask_flags.intersects(PpuMask::BACKGROUND_LEFT_ENABLE))
+        {
             background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
                 | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
 
             background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
                 | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
         }
+
+        return (background_pixel, background_palette);
+    }
+
+    /// Calculates that foreground pixel and palette based on the shifters and x positions.
+    /// Also uses the background_pixel parameter to determine if the sprite zero hit has occurred
+    /// and set the status flag accordingly.
+    fn calculate_foreground_pixel(&mut self, background_pixel: u8) -> (u8, u8, bool) {
+        let mut foreground_pixel = 0x00;
+        let mut foreground_palette = 0x00;
+        let mut foreground_priority = false;
 
         for i in 0..self.sprite_x_offsets.len() {
             // Decrement all the sprite x offsets from the current pixel
@@ -436,7 +464,9 @@ impl NesPpu {
 
             // If the x offset is in range and a higher priority sprite isn't already on this pixel
             if self.sprite_x_offsets[i] <= 0 && self.sprite_x_offsets[i] > -0x8 && foreground_pixel == 0x00 {
-                if self.mask_flags.intersects(PpuMask::SPRITE_ENABLE) {
+                if self.mask_flags.intersects(PpuMask::SPRITE_ENABLE)
+                    && (!(self.cycle > 0 && self.cycle <= 8) || self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE))
+                {
                     foreground_pixel = (((self.sprite_shifters_hi[i] << -self.sprite_x_offsets[i]) & 0x80) >> 6)
                         | (((self.sprite_shifters_lo[i] << -self.sprite_x_offsets[i]) & 0x80) >> 7);
 
@@ -450,9 +480,9 @@ impl NesPpu {
                     && foreground_pixel > 0
                     && background_pixel > 0
                     // There are a couple edge cases where sprite zero hit does not occur
-                    && !(self.cycle > 0
-                    && self.cycle <= 8
-                    && self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE | PpuMask::BACKGROUND_LEFT_ENABLE))
+                    && (!(self.cycle > 0
+                    && self.cycle <= 8)
+                    || self.mask_flags.intersects(PpuMask::SPRITE_LEFT_ENABLE | PpuMask::BACKGROUND_LEFT_ENABLE))
                     && self.cycle != 256
                 {
                     self.status_flags.set(PpuStatus::SPRITE_0_HIT, true);
@@ -460,16 +490,7 @@ impl NesPpu {
             }
         }
 
-        // Determine if the background or foreground pixel takes priority
-        let (pixel, palette) = NesPpu::colour_priority(
-            foreground_pixel,
-            foreground_palette,
-            background_pixel,
-            background_palette,
-            foreground_priority,
-        );
-        self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] =
-            NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
+        return (foreground_pixel, foreground_palette, foreground_priority);
     }
 
     /// Function for reading from the PPU. Any address passed to the function will be mapped to one of
@@ -830,7 +851,481 @@ mod test {
     use crate::cartridge::test_utils::*;
     use crate::nes::NES_SCREEN_DIMENSIONS;
     use std::fmt::{Debug, Formatter, Result};
-    // TODO: Fix Expected/Actual positions
+
+    #[test]
+    fn test_select_next_background_tile_cycle_0() {
+        let mut ppu_base = NesPpu {
+            current_vram_address: 0b0111000_10100111,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
+            write_latch: false,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(Default::default());
+
+        let mut ppu_expected = NesPpu { ..ppu_base.clone() };
+        ppu_expected.coarse_x_increment();
+
+        ppu_base.select_next_background_tile(&mut cartridge);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_select_next_background_tile_cycle_1() {
+        let mut ppu_base = NesPpu {
+            cycle: 9,
+            current_vram_address: 0b0111000_10100111,
+            attribute_latch: 0b01,
+            pattern_latch_lo: 0xcf,
+            pattern_latch_hi: 0x4a,
+            attribute_shifter_lo: 0x0000,
+            attribute_shifter_hi: 0xff00,
+            pattern_shifter_lo: 0x1700,
+            pattern_shifter_hi: 0xa500,
+            ..Default::default()
+        };
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| Mirroring::Horizontal,
+            ..Default::default()
+        });
+        ppu_base.vram_write(0x28a7, 0x20, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            nametable_id: 0x20,
+            ..ppu_base.clone()
+        };
+        ppu_expected.reload_shifters();
+
+        ppu_base.select_next_background_tile(&mut cartridge);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_select_next_background_tile_cycle_3() {
+        let mut ppu_base = NesPpu {
+            cycle: 3,
+            current_vram_address: 0b00000011_11000000,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            get_mirroring_stub: |_| Mirroring::Horizontal,
+            ..Default::default()
+        });
+
+        ppu_base.vram_write(0x23f8, 0x1 << 4, &mut cartridge);
+
+        let mut ppu_expected = NesPpu {
+            attribute_latch: 0x1,
+            ..ppu_base.clone()
+        };
+        ppu_expected.read_attribute_table_byte(&mut cartridge);
+
+        ppu_base.select_next_background_tile(&mut cartridge);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_select_next_background_tile_cycle_5() {
+        let mut ppu_base = NesPpu {
+            cycle: 5,
+            ctrl_flags: PpuCtrl::BACKGROUND_SELECT,
+            nametable_id: 0b10001011,
+            current_vram_address: 0b10100011_11000000,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            character_read_stub: |address, _| {
+                assert_eq!(0b0001_1000_1011_1010, address);
+                return 0x4a;
+            },
+            ..Default::default()
+        });
+
+        let ppu_expected = NesPpu {
+            pattern_latch_lo: 0x4a,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.select_next_background_tile(&mut cartridge);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_select_next_background_tile_cycle_7() {
+        let mut ppu_base = NesPpu {
+            cycle: 7,
+            ctrl_flags: PpuCtrl::BACKGROUND_SELECT,
+            nametable_id: 0b10001011,
+            current_vram_address: 0b10100011_11000000,
+            ..Default::default()
+        };
+
+        let mut cartridge = get_mock_cartridge(MapperMock {
+            character_read_stub: |address, _| {
+                assert_eq!(0b0001_1000_1011_1010 + 8, address);
+                return 0x4a;
+            },
+            ..Default::default()
+        });
+
+        let ppu_expected = NesPpu {
+            pattern_latch_hi: 0x4a,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.select_next_background_tile(&mut cartridge);
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_cycles_1_to_64() {
+        let mut ppu_base = NesPpu {
+            secondary_sprite_evaluation_index: 0x71,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu {
+            cycle: 64,
+            secondary_sprite_evaluation_index: 32,
+            secondary_object_attribute_memory: [0xff; 32],
+            ..ppu_base.clone()
+        };
+
+        for i in 0..=64 {
+            ppu_base.cycle = i;
+            ppu_base.perform_sprite_evaluation();
+        }
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_cycle_66() {
+        let mut ppu_base = NesPpu {
+            cycle: 66,
+            scanline: 20,
+            ..Default::default()
+        };
+        ppu_base.object_attribute_memory[0..4].copy_from_slice(&[40, 0x16, SpriteAttribute::PALETTE.bits, 100]);
+
+        let ppu_expected = NesPpu {
+            secondary_sprite_evaluation_index: 0,
+            sprite_evaluation_index: 4,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.perform_sprite_evaluation();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_on_scanline() {
+        let mut ppu_base = NesPpu {
+            cycle: 68,
+            scanline: 40,
+            sprite_evaluation_index: 4,
+            ..Default::default()
+        };
+        ppu_base.object_attribute_memory[4..8].copy_from_slice(&[40, 0x16, SpriteAttribute::PALETTE.bits, 100]);
+
+        let mut ppu_expected = NesPpu {
+            secondary_sprite_evaluation_index: 4,
+            sprite_evaluation_index: 8,
+            ..ppu_base.clone()
+        };
+        ppu_expected.secondary_object_attribute_memory[0..4].copy_from_slice(&ppu_base.object_attribute_memory[4..8]);
+
+        ppu_base.perform_sprite_evaluation();
+        assert_eq!(
+            ppu_expected.secondary_object_attribute_memory[0..4],
+            ppu_base.secondary_object_attribute_memory[0..4],
+        );
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_on_scanline_sprite_zero() {
+        let mut ppu_base = NesPpu {
+            cycle: 66,
+            scanline: 40,
+            ..Default::default()
+        };
+        ppu_base.object_attribute_memory[0..4].copy_from_slice(&[40, 0x16, SpriteAttribute::PALETTE.bits, 100]);
+
+        let mut ppu_expected = NesPpu {
+            secondary_sprite_evaluation_index: 4,
+            sprite_evaluation_index: 4,
+            ..ppu_base.clone()
+        };
+        ppu_expected.secondary_object_attribute_memory[0..4].copy_from_slice(&ppu_base.object_attribute_memory[0..4]);
+        ppu_expected.secondary_object_attribute_memory[2] |= SpriteAttribute::SPRITE_ZERO.bits;
+
+        ppu_base.perform_sprite_evaluation();
+        assert_eq!(
+            ppu_expected.secondary_object_attribute_memory[0..4],
+            ppu_base.secondary_object_attribute_memory[0..4],
+        );
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_overflow() {
+        let mut ppu_base = NesPpu {
+            cycle: 122,
+            scanline: 40,
+            sprite_evaluation_index: 32,
+            secondary_sprite_evaluation_index: 32,
+            status_flags: PpuStatus::from_bits_truncate(0),
+            ..Default::default()
+        };
+        ppu_base.object_attribute_memory[32..36].copy_from_slice(&[40, 0x16, SpriteAttribute::PALETTE.bits, 100]);
+
+        let ppu_expected = NesPpu {
+            sprite_evaluation_index: 37,
+            status_flags: PpuStatus::SPRITE_OVERFLOW,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.perform_sprite_evaluation();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_perform_sprite_evaluation_overflow_search_bug() {
+        let mut ppu_base = NesPpu {
+            cycle: 122,
+            scanline: 40,
+            sprite_evaluation_index: 32,
+            secondary_sprite_evaluation_index: 32,
+            status_flags: PpuStatus::from_bits_truncate(0),
+            ..Default::default()
+        };
+        ppu_base.object_attribute_memory[32..36].copy_from_slice(&[80, 0x16, SpriteAttribute::PALETTE.bits, 100]);
+
+        let ppu_expected = NesPpu {
+            sprite_evaluation_index: 37,
+            ..ppu_base.clone()
+        };
+
+        ppu_base.perform_sprite_evaluation();
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_background_pixel() {
+        let mut ppu_base = NesPpu {
+            pattern_shifter_lo: 0b0001_0000_0000_0000,
+            pattern_shifter_hi: 0b0001_0000_0000_0000,
+            attribute_shifter_lo: 0b1111_1111_1111_1111,
+            attribute_shifter_hi: 0b0000_0000_0000_0000,
+            fine_x_scroll: 3,
+            mask_flags: PpuMask::BACKGROUND_ENABLE | PpuMask::BACKGROUND_LEFT_ENABLE,
+            cycle: 6,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
+
+        assert_eq!((0b11, 0b01), ppu_base.calculate_background_pixel());
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_background_pixel_background_disabled() {
+        let mut ppu_base = NesPpu {
+            pattern_shifter_lo: 0b0001_0000_0000_0000,
+            pattern_shifter_hi: 0b0001_0000_0000_0000,
+            attribute_shifter_lo: 0b1111_1111_1111_1111,
+            attribute_shifter_hi: 0b0000_0000_0000_0000,
+            fine_x_scroll: 3,
+            mask_flags: PpuMask::from_bits_truncate(0),
+            cycle: 6,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
+
+        assert_eq!((0b00, 0b00), ppu_base.calculate_background_pixel());
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_background_pixel_background_left_disabled_cycle_6() {
+        let mut ppu_base = NesPpu {
+            pattern_shifter_lo: 0b0001_0000_0000_0000,
+            pattern_shifter_hi: 0b0001_0000_0000_0000,
+            attribute_shifter_lo: 0b1111_1111_1111_1111,
+            attribute_shifter_hi: 0b0000_0000_0000_0000,
+            fine_x_scroll: 3,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
+            cycle: 6,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
+
+        assert_eq!((0b00, 0b00), ppu_base.calculate_background_pixel());
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_background_pixel_cycle_9() {
+        let mut ppu_base = NesPpu {
+            pattern_shifter_lo: 0b0001_0000_0000_0000,
+            pattern_shifter_hi: 0b0001_0000_0000_0000,
+            attribute_shifter_lo: 0b1111_1111_1111_1111,
+            attribute_shifter_hi: 0b0000_0000_0000_0000,
+            fine_x_scroll: 3,
+            mask_flags: PpuMask::BACKGROUND_ENABLE,
+            cycle: 9,
+            ..Default::default()
+        };
+
+        let ppu_expected = NesPpu { ..ppu_base.clone() };
+
+        assert_eq!((0b11, 0b01), ppu_base.calculate_background_pixel());
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_foreground_pixel() {
+        let mut ppu_base = NesPpu {
+            mask_flags: PpuMask::SPRITE_ENABLE | PpuMask::SPRITE_LEFT_ENABLE,
+            cycle: 9,
+            sprite_x_offsets: [-8; 8],
+            sprite_attributes: [SpriteAttribute::from_bits_truncate(0); 8],
+            sprite_shifters_lo: [0; 8],
+            sprite_shifters_hi: [0; 8],
+            status_flags: PpuStatus::from_bits(0).unwrap(),
+            ..Default::default()
+        };
+        ppu_base.sprite_x_offsets[2] = 4;
+        ppu_base.sprite_shifters_lo[2] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[2] = 0b0000_1000;
+        ppu_base.sprite_attributes[2] = SpriteAttribute::from_bits(0).unwrap() | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[3] = -3;
+        ppu_base.sprite_shifters_lo[3] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[3] = 0b0000_1000;
+        ppu_base.sprite_attributes[3] = SpriteAttribute::PALETTE | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[4] = -3;
+        ppu_base.sprite_shifters_lo[4] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[4] = 0b0000_1000;
+        ppu_base.sprite_attributes[4] = SpriteAttribute::from_bits(1).unwrap() | SpriteAttribute::PRIORITY;
+
+        let mut ppu_expected = NesPpu { ..ppu_base.clone() };
+        ppu_expected.sprite_x_offsets[2..5].clone_from_slice(&[3, -4, -4]);
+
+        assert_eq!((0b11, 0b11 + 4, false), ppu_base.calculate_foreground_pixel(0b01));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_foreground_pixel_foreground_disabled() {
+        let mut ppu_base = NesPpu {
+            mask_flags: PpuMask::from_bits(0).unwrap(),
+            cycle: 9,
+            sprite_x_offsets: [-8; 8],
+            sprite_attributes: [SpriteAttribute::from_bits_truncate(0); 8],
+            sprite_shifters_lo: [0; 8],
+            sprite_shifters_hi: [0; 8],
+            status_flags: PpuStatus::from_bits(0).unwrap(),
+            ..Default::default()
+        };
+        ppu_base.sprite_x_offsets[2] = -2;
+        ppu_base.sprite_shifters_lo[2] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[2] = 0b0000_1000;
+        ppu_base.sprite_attributes[2] = SpriteAttribute::from_bits(0).unwrap() | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[3] = -3;
+        ppu_base.sprite_shifters_lo[3] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[3] = 0b0000_1000;
+        ppu_base.sprite_attributes[3] = SpriteAttribute::PALETTE | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[4] = -3;
+        ppu_base.sprite_shifters_lo[4] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[4] = 0b0000_1000;
+        ppu_base.sprite_attributes[4] = SpriteAttribute::from_bits(1).unwrap() | SpriteAttribute::PRIORITY;
+
+        let mut ppu_expected = NesPpu { ..ppu_base.clone() };
+        ppu_expected.sprite_x_offsets[2..5].clone_from_slice(&[-3, -4, -4]);
+
+        assert_eq!((0b00, 0b00, false), ppu_base.calculate_foreground_pixel(0b01));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_foreground_pixel_foreground_left_disabled() {
+        let mut ppu_base = NesPpu {
+            mask_flags: PpuMask::SPRITE_ENABLE,
+            cycle: 6,
+            sprite_x_offsets: [-8; 8],
+            sprite_attributes: [SpriteAttribute::from_bits_truncate(0); 8],
+            sprite_shifters_lo: [0; 8],
+            sprite_shifters_hi: [0; 8],
+            status_flags: PpuStatus::from_bits(0).unwrap(),
+            ..Default::default()
+        };
+        ppu_base.sprite_x_offsets[2] = -2;
+        ppu_base.sprite_shifters_lo[2] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[2] = 0b0000_1000;
+        ppu_base.sprite_attributes[2] = SpriteAttribute::from_bits(0).unwrap() | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[3] = -3;
+        ppu_base.sprite_shifters_lo[3] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[3] = 0b0000_1000;
+        ppu_base.sprite_attributes[3] = SpriteAttribute::PALETTE | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[4] = -3;
+        ppu_base.sprite_shifters_lo[4] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[4] = 0b0000_1000;
+        ppu_base.sprite_attributes[4] = SpriteAttribute::from_bits(1).unwrap() | SpriteAttribute::PRIORITY;
+
+        let mut ppu_expected = NesPpu { ..ppu_base.clone() };
+        ppu_expected.sprite_x_offsets[2..5].clone_from_slice(&[-3, -4, -4]);
+
+        assert_eq!((0b00, 0b00, false), ppu_base.calculate_foreground_pixel(0b01));
+        assert_eq!(ppu_expected, ppu_base)
+    }
+
+    #[test]
+    fn test_calculate_foreground_pixel_sprite_zero() {
+        let mut ppu_base = NesPpu {
+            mask_flags: PpuMask::SPRITE_ENABLE,
+            cycle: 9,
+            sprite_x_offsets: [-8; 8],
+            sprite_attributes: [SpriteAttribute::from_bits_truncate(0); 8],
+            sprite_shifters_lo: [0; 8],
+            sprite_shifters_hi: [0; 8],
+            status_flags: PpuStatus::from_bits(0).unwrap(),
+            ..Default::default()
+        };
+        ppu_base.sprite_x_offsets[2] = -3;
+        ppu_base.sprite_shifters_lo[2] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[2] = 0b0000_1000;
+        ppu_base.sprite_attributes[2] = SpriteAttribute::from_bits(2).unwrap() | SpriteAttribute::PRIORITY | SpriteAttribute::SPRITE_ZERO;
+
+        ppu_base.sprite_x_offsets[3] = -3;
+        ppu_base.sprite_shifters_lo[3] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[3] = 0b0000_1000;
+        ppu_base.sprite_attributes[3] = SpriteAttribute::PALETTE | SpriteAttribute::PRIORITY;
+
+        ppu_base.sprite_x_offsets[4] = -3;
+        ppu_base.sprite_shifters_lo[4] = 0b0000_1000;
+        ppu_base.sprite_shifters_hi[4] = 0b0000_1000;
+        ppu_base.sprite_attributes[4] = SpriteAttribute::from_bits(1).unwrap() | SpriteAttribute::PRIORITY;
+
+        let mut ppu_expected = NesPpu {
+            status_flags: PpuStatus::SPRITE_0_HIT,
+            ..ppu_base.clone()
+        };
+        ppu_expected.sprite_x_offsets[2..5].clone_from_slice(&[-4, -4, -4]);
+
+        assert_eq!((0b11, 0b10 + 4, false), ppu_base.calculate_foreground_pixel(0b01));
+        assert_eq!(ppu_expected, ppu_base)
+    }
 
     #[test]
     fn test_vram_address_first_write() {
