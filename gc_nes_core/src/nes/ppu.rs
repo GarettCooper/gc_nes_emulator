@@ -399,7 +399,9 @@ impl NesPpu {
                 // For 16 pixel tall sprites, the pattern table is selected
                 // based on the least significant bit of the pattern id instead
                 // of the nametable select flag.
-                ((sprite_pattern_id & 0x01) << 12) | ((sprite_pattern_id | 0x01) << 4) | sprite_pattern_row
+                ((sprite_pattern_id & 0x01) << 12)
+                    | (((sprite_pattern_id & 0xfe) + if sprite_pattern_row > 7 { 1 } else { 0 }) << 4)
+                    | (sprite_pattern_row & 0x07)
             };
 
             self.sprite_shifters_lo[sprite_index] = self.vram_read(sprite_address, cartridge);
