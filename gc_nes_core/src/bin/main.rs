@@ -1,6 +1,6 @@
 use crate::structopt::StructOpt;
-use gc_nes_emulator::cartridge::Cartridge;
-use gc_nes_emulator::nes::Nes;
+use gc_nes_core::cartridge::Cartridge;
+use gc_nes_core::nes::Nes;
 use minifb::{Key, Scale, Window, WindowOptions};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -14,6 +14,7 @@ const FRAME_DURATION: Duration = Duration::from_millis(16);
 
 fn main() {
     let arguments = Arguments::from_args();
+    std::env::set_var("RUST_LOG", "gc_nes_core::cartridge::mapper=debug,gc_nes_core::cartridge=trace");
     env_logger::init();
 
     let scale = match arguments.scale {
