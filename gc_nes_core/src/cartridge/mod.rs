@@ -95,7 +95,10 @@ impl Cartridge {
             let program_ram_size = calculate_ram_size(header[10], 0);
             debug!("Allocating {} bytes for program RAM", program_rom_size);
 
-            let character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes2)?;
+            let mut character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes2)?;
+            if character_rom_size == 0 {
+                character_rom_size = 0x2000
+            }
             debug!("Allocating {} bytes for character ROM", character_rom_size);
 
             let mut cartridge = Cartridge {
@@ -113,7 +116,7 @@ impl Cartridge {
             }
 
             buf_reader.read_exact(cartridge.program_rom.as_mut())?;
-            buf_reader.read_exact(cartridge.character_ram.as_mut())?;
+            buf_reader.read(cartridge.character_ram.as_mut())?;
 
             info!("File loaded successfully");
             return Ok(cartridge);
