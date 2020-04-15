@@ -396,12 +396,12 @@ impl NesPpu {
             let sprite_address: u16 = if !self.ctrl_flags.intersects(PpuCtrl::SPRITE_HEIGHT) {
                 (((self.ctrl_flags & PpuCtrl::SPRITE_SELECT).bits as u16) << 8) | (sprite_pattern_id << 4) | sprite_pattern_row
             } else {
+                // Determine which of the two tiles in a 16 bit sprite should be shown
+                let tile_id = ((self.scanline - sprite_y as u16) >> 3) ^ (self.sprite_attributes[sprite_index].bits >> 7) as u16;
                 // For 16 pixel tall sprites, the pattern table is selected
                 // based on the least significant bit of the pattern id instead
                 // of the nametable select flag.
-                ((sprite_pattern_id & 0x01) << 12)
-                    | (((sprite_pattern_id & 0xfe) + if sprite_pattern_row > 7 { 1 } else { 0 }) << 4)
-                    | (sprite_pattern_row & 0x07)
+                ((sprite_pattern_id & 0x01) << 12) | (((sprite_pattern_id & 0xfe) + tile_id) << 4) | (sprite_pattern_row & 0x07)
             };
 
             self.sprite_shifters_lo[sprite_index] = self.vram_read(sprite_address, cartridge);
