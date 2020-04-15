@@ -6,6 +6,7 @@ pub(super) fn get_mapper(mapper_id: u16, submapper_id: u8) -> Result<Box<dyn Map
     match mapper_id {
         0 => Ok(Box::new(Mapper000 {})),
         2 => Ok(Box::new(Mapper002 { bank_select: 0x00 })),
+        3 => Ok(Box::new(Mapper003 { bank_select: 0x00 })),
         _ => bail!("Mapper ID {} not found!", mapper_id),
     }
 }
@@ -13,20 +14,10 @@ pub(super) fn get_mapper(mapper_id: u16, submapper_id: u8) -> Result<Box<dyn Map
 /// The circuit in the cartridge that is reponsible for mapping the addresses provided by the cpu to the onboard memory.
 /// ROM only for now.
 pub(super) trait Mapper {
-    fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8;
-    fn character_read(&self, character_ram: &[u8], address: u16) -> u8;
-    fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8);
-    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8);
-    fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring;
-}
-
-pub(super) struct Mapper000 {}
-
-impl Mapper for Mapper000 {
     fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
         match address {
             0x0000..=0x5fff => {
-                warn!("Mapper000 read from {:04X}", address);
+                warn!("Mapper read from {:04X}", address);
                 return 0x00;
             }
             0x6000..=0x7fff => {
@@ -43,7 +34,7 @@ impl Mapper for Mapper000 {
                     program_rom[usize::from(address - 0x8000) % program_rom.len()]
                 }
             }
-            _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
+            _ => panic!("Mapper::program_read called with invalid address 0x{:4X}", address),
         }
     }
 
@@ -54,7 +45,7 @@ impl Mapper for Mapper000 {
     fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
         match address {
             0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
-            _ => warn!("Mapper000::program_write called with invalid address 0x{:4X}", address),
+            _ => warn!("Mapper::program_write called with invalid address 0x{:4X}", address),
         }
     }
 
@@ -67,6 +58,12 @@ impl Mapper for Mapper000 {
     }
 }
 
+/// Mapper struct for the NROM Mapper, which is given the iNES id of 000
+pub(super) struct Mapper000 {}
+
+impl Mapper for Mapper000 {}
+
+/// Mapper struct for the UxROM Mappers, which are given the iNES id of 002
 pub(super) struct Mapper002 {
     bank_select: u8,
 }
@@ -93,10 +90,6 @@ impl Mapper for Mapper002 {
         }
     }
 
-    fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
-        return character_ram[usize::from(address)];
-    }
-
     fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
         match address {
             0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
@@ -105,12 +98,30 @@ impl Mapper for Mapper002 {
             _ => warn!("Mapper001::program_write called with invalid address 0x{:4X}", address),
         }
     }
+}
 
-    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
-        character_ram[usize::from(address)] = data;
+/// Mapper struct for the CNROM Mapper, which is given the iNES id of 003
+pub(super) struct Mapper003 {
+    bank_select: u8,
+}
+
+impl Mapper for Mapper003 {
+    fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
+        return character_ram[usize::from(address & 0x1fff) | (self.bank_select as usize * 0x2000)];
     }
 
-    fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring {
-        return mirroring;
+    fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
+        match address {
+            0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
+            0x8000..=0xffff => {
+                // The real CNROM has two security bits, but I'm ignoring those
+                self.bank_select = data & 0x03;
+            }
+            _ => warn!("Mapper003::program_write called with invalid address 0x{:4X}", address),
+        }
+    }
+
+    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
+        character_ram[usize::from(address & 0x1fff) | (self.bank_select as usize * 0x2000)] = data;
     }
 }
