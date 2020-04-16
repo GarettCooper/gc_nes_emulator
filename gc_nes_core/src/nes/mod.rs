@@ -138,6 +138,12 @@ impl Nes {
         }
         // PPU cycle runs regardless
         self.bus.ppu.cycle(&mut self.bus.cartridge, &mut self.cpu);
+
+        // Check if the Cartridge is triggering an interrupt
+        if self.bus.cartridge.get_pending_interrupt_request() {
+            self.cpu.interrupt_request();
+        }
+
         self.cycle_count += 1;
     }
 

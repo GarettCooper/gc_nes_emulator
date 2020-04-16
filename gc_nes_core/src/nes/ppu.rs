@@ -188,20 +188,22 @@ impl NesPpu {
                         }
 
                         // Special Cases!
-                        match (self.cycle, self.scanline) {
+                        match (
+                            self.cycle,
+                            self.scanline,
+                            self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE),
+                        ) {
                             // Load the x information from the temporary vram address into the active vram address
-                            (257, _) => {
-                                if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                                    self.current_vram_address = (self.current_vram_address & !(0x400 | COARSE_X_MASK))
-                                        | (self.temporary_vram_address & (0x400 | COARSE_X_MASK));
-                                }
+                            (257, _, true) => {
+                                self.current_vram_address =
+                                    (self.current_vram_address & !(0x400 | COARSE_X_MASK)) | (self.temporary_vram_address & (0x400 | COARSE_X_MASK))
                             }
+                            (260, 0..=240, true) if self.ctrl_flags.intersects(PpuCtrl::SPRITE_SELECT) => cartridge.end_of_scanline(),
+                            (324, 0..=240, true) if self.ctrl_flags.intersects(PpuCtrl::BACKGROUND_SELECT) => cartridge.end_of_scanline(),
                             // Load the y information from the temporary vram address into the active vram address repeatedly
-                            (280..=304, MAX_SCANLINES) => {
-                                if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE | PpuMask::SPRITE_ENABLE) {
-                                    self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
-                                        | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK));
-                                }
+                            (280..=304, MAX_SCANLINES, true) => {
+                                self.current_vram_address = (self.current_vram_address & !(FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
+                                    | (self.temporary_vram_address & (FINE_Y_MASK | 0x800 | COARSE_Y_MASK))
                             }
                             _ => {}
                         }

@@ -51,6 +51,17 @@ impl Cartridge {
         return self.mapper.get_mirroring(self.mirroring);
     }
 
+    /// Check if the cartridge is triggering an interrupt
+    pub(crate) fn get_pending_interrupt_request(&mut self) -> bool {
+        return self.mapper.get_pending_interrupt_request();
+    }
+
+    /// Called at the end of each scanline. Used by iNES Mapper 004 to
+    /// trigger interrupt requests at specific times during screen rendering
+    pub(crate) fn end_of_scanline(&mut self) {
+        self.mapper.end_of_scanline();
+    }
+
     /// Loads a cartridge from a file
     pub fn load_from_file(file_path: &Path) -> Result<Cartridge, Box<dyn Error>> {
         info!("Opening file: {}", file_path.to_str().unwrap());
@@ -92,8 +103,11 @@ impl Cartridge {
             let program_rom_size = calculate_rom_size(header[4], header[9] & 0x0f, PROGRAM_ROM_BANK_SIZE, nes2)?;
             debug!("Allocating {} bytes for program ROM", program_rom_size);
 
-            let program_ram_size = calculate_ram_size(header[10], 0);
-            debug!("Allocating {} bytes for program RAM", program_rom_size);
+            let mut program_ram_size = calculate_ram_size(header[10], 0);
+            if program_ram_size == 0 {
+                program_ram_size = 0x2000
+            }
+            debug!("Allocating {} bytes for program RAM", program_ram_size);
 
             let mut character_rom_size = calculate_rom_size(header[5], header[9] & 0xf0, CHARACTER_ROM_BANK_SIZE, nes2)?;
             if character_rom_size == 0 {
