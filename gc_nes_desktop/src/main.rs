@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 #[macro_use]
 extern crate log;
-
+extern crate gc_nes_core;
 extern crate structopt;
 
 const FRAME_DURATION: Duration = Duration::from_millis(16);

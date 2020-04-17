@@ -10,6 +10,7 @@
       <sourceFolder url="file://$MODULE_DIR$/gc_nes_core/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/gc_nes_core/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/gc_nes_core/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/gc_nes_desktop/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/gc_nes_core/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

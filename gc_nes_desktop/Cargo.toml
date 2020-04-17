@@ -1,5 +1,5 @@
 [package]
-name = "gc_nes_core"
+name = "gc_nes_desktop"
 version = "0.1.0"
 authors = ["Garett Cooper"]
 edition = "2018"
@@ -10,10 +10,11 @@ keywords = ["emulator", "games", "nes"]
 categories = ["emulators"]
 license = "MIT"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+gc_nes_core = { path = "../gc_nes_core", version = "0.1.0" }
 log = "*"
-emulator_6502 = "1.0.0"
-bitflags = "1.2.0"
-simple-error = "0.2.1"
-bit_reverse = "0.1.8"
+env_logger = "0.7.0"
+minifb = "0.13.0"
+structopt = "0.3" # Replace with clap when 3.0.0 comes out of beta
