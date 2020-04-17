@@ -1,3 +1,6 @@
+//! The cartridge module contains all of the code related to the functionality of
+//! NES cartridges, as well as the functions for loading .nes files.
+
 mod mapper;
 
 use mapper::Mapper;
@@ -193,6 +196,8 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, PartialEq)]
+/// Enum used to represent the various mirroring modes of the NES,
+/// which are used to map nametable addresses.
 pub(crate) enum Mirroring {
     OneScreenLower,
     OneScreenUpper,
@@ -201,6 +206,7 @@ pub(crate) enum Mirroring {
 }
 
 #[cfg(test)]
+/// Module of some mock types that have been created for testing convenience
 pub(crate) mod test_utils {
     use super::*;
 

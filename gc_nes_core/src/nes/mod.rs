@@ -1,3 +1,7 @@
+//! The nes module contains the connective tissue of the NES.
+//! It contains the the code for communication between the CPU
+//! and the PPU.
+
 extern crate emulator_6502;
 
 use crate::cartridge::Cartridge;
@@ -147,11 +151,12 @@ impl Nes {
         self.cycle_count += 1;
     }
 
+    /// Runs as many cycles as necessary to complete the current frame.
+    /// Returns the frame as an of 32 bit colour ARGB colour values.
     pub fn frame(&mut self) -> &[u32; NES_SCREEN_DIMENSIONS] {
         let current_frame = self.bus.ppu.frame_count;
         while self.bus.ppu.frame_count == current_frame {
             self.cycle();
-            //trace!("Cycle Count: {}", self.cycle_count)
         }
         return self.get_screen();
     }

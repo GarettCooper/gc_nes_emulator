@@ -1,3 +1,8 @@
+//! The input module handles, as the name suggests, input devices
+//! for the NES. There are a number of redundancies in this module
+//! that are a remnant of an old input system but I haven't gotten
+//! around to reworking it.
+
 /// Enum for representing a NES input port
 #[derive(Debug)]
 pub(crate) enum NesInput {
@@ -74,7 +79,7 @@ impl NesInputDevice {
         // Set the new bit to 1, which is returned after 8 polls on official NES controllers
         self.shift_register |= 0x80;
         // Return the result bit with the top 5 bits as the previous byte on the bus
-        return result | (bus & 0xf4);
+        return result | (bus & 0xf8);
     }
 
     /// Reloads the shift register to the input state

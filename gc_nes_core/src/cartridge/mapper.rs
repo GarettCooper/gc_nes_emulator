@@ -1,3 +1,8 @@
+//! The mapper module contains implementation code for the various
+//! types of mapping circuits that were present in NES cartridges.
+//!
+//! At present only iNES mappers 000 through 004 are supported.
+
 use super::*;
 
 /// Returns a boxed mapper based on the mapper_id argument
@@ -26,13 +31,14 @@ pub(super) fn get_mapper(mapper_id: u16, submapper_id: u8) -> Result<Box<dyn Map
             interrupt_request_enabled: false,
             pending_interrupt_request: false,
         })),
-        _ => bail!("Mapper ID {:03} not found!", mapper_id),
+        _ => bail!("Mapper ID {:03} unsupported!", mapper_id),
     }
 }
 
 /// The circuit in the cartridge that is reponsible for mapping the addresses provided by the cpu to the onboard memory.
 /// ROM only for now.
 pub(super) trait Mapper {
+    /// Read from the cartridge's program ROM/RAM through the cartridge's mapper
     fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
         match address {
             0x0000..=0x5fff => {
@@ -57,10 +63,12 @@ pub(super) trait Mapper {
         }
     }
 
+    /// Read from the cartridge's character ROM/RAM through the cartridge's mapper
     fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
         return character_ram[usize::from(address)];
     }
 
+    /// Write to the cartridge's program RAM through the cartridge's mapper
     fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
         match address {
             0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
@@ -68,18 +76,23 @@ pub(super) trait Mapper {
         }
     }
 
+    /// Write to the cartridge's character RAM through the cartridge's mapper
     fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
         character_ram[usize::from(address)] = data;
     }
 
+    /// Get the mirroring mode from the cartridge
     fn get_mirroring(&mut self, mirroring: Mirroring) -> Mirroring {
         return mirroring;
     }
 
+    /// Check if the cartridge is triggering an interrupt
     fn get_pending_interrupt_request(&mut self) -> bool {
         return false;
     }
 
+    /// Called at the end of each scanline. Used by iNES Mapper 004 to
+    /// trigger interrupt requests at specific times during screen rendering
     fn end_of_scanline(&mut self) {}
 }
 

@@ -1,3 +1,7 @@
+//! The ppu module holds all of the code related to the functioning of the
+//! NES' Picture Processing Unit, which is responsible for drawing pixels
+//! to the screen.
+
 use super::emulator_6502::MOS6502;
 use crate::cartridge::{Cartridge, Mirroring};
 use bit_reverse::BitwiseReverse;
@@ -21,6 +25,7 @@ const FINE_Y_MASK: u16 = 0b01110000_00000000;
 const FINE_Y_OFFSET: u16 = 12;
 
 #[cfg_attr(test, derive(Clone))]
+/// Structure used to hold the registers and the state of the NES Picture Processing Unit
 pub(super) struct NesPpu {
     /// Register containing flags used for controlling the function of the PPU
     ctrl_flags: PpuCtrl,
