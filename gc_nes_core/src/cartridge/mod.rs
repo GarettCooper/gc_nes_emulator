@@ -194,8 +194,10 @@ bitflags! {
 
 #[derive(Copy, Clone, PartialEq)]
 pub(crate) enum Mirroring {
-    Horizontal,
+    OneScreenLower,
+    OneScreenUpper,
     Vertical,
+    Horizontal,
 }
 
 #[cfg(test)]

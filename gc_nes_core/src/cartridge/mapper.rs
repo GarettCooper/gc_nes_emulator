@@ -5,6 +5,13 @@ pub(super) fn get_mapper(mapper_id: u16, submapper_id: u8) -> Result<Box<dyn Map
     debug!("Getting mapper with id {}, submapper {}", mapper_id, submapper_id);
     match mapper_id {
         0 => Ok(Box::new(Mapper000 {})),
+        1 => Ok(Box::new(Mapper001 {
+            load_register: 0x10,
+            control_register: 0x1c,
+            character_bank_0_register: 0,
+            character_bank_1_register: 0,
+            program_bank_register: 0,
+        })),
         2 => Ok(Box::new(Mapper002 { bank_select: 0x00 })),
         3 => Ok(Box::new(Mapper003 { bank_select: 0x00 })),
         4 => Ok(Box::new(Mapper004 {
@@ -46,6 +53,7 @@ pub(super) trait Mapper {
                     program_rom[usize::from(address - 0x8000) % program_rom.len()]
                 }
             }
+            _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
         }
     }
 
@@ -79,6 +87,102 @@ pub(super) trait Mapper {
 pub(super) struct Mapper000 {}
 
 impl Mapper for Mapper000 {}
+
+/// Mapper struct for the SxROM Mappers, which are given the iNES id of 001
+pub(super) struct Mapper001 {
+    load_register: u8,
+    control_register: u8,
+    character_bank_0_register: u8,
+    character_bank_1_register: u8,
+    program_bank_register: u8,
+}
+
+impl Mapper for Mapper001 {
+    fn program_read(&self, program_rom: &[u8], program_ram: &[u8], address: u16) -> u8 {
+        match address {
+            0x0000..=0x5fff => {
+                warn!("Mapper001 read from {:04X}", address);
+                return 0x00;
+            }
+            0x6000..=0x7fff => {
+                if self.program_bank_register & 0x10 > 0 && program_ram.len() == 0 {
+                    0x00
+                } else {
+                    program_ram[usize::from(address - 0x6000) % program_ram.len()]
+                }
+            }
+            0x8000..=0xffff => match ((self.control_register & 0x0c) >> 2, address) {
+                (0, _) => program_rom[usize::from(address & 0x7fff)],
+                (1, _) => program_rom[usize::from(address & 0x7fff) + ((self.program_bank_register as usize & 0x0e) * 0x4000)],
+                (2, 0x8000..=0xbfff) => program_rom[usize::from(address & 0x3fff)],
+                (2, 0xc000..=0xffff) => program_rom[usize::from(address & 0x3fff) + ((self.program_bank_register as usize & 0x0f) * 0x4000)],
+                (3, 0x8000..=0xbfff) => program_rom[usize::from(address & 0x3fff) + ((self.program_bank_register as usize & 0x0f) * 0x4000)],
+                (3, 0xc000..=0xffff) => {
+                    program_rom[(usize::from(address & 0x3fff) + ((program_rom.len() / 0x4000 - 1) * 0x4000)) % program_rom.len()]
+                }
+                _ => unreachable!(),
+            },
+            _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
+        }
+    }
+
+    fn character_read(&self, character_ram: &[u8], address: u16) -> u8 {
+        return match (self.control_register & 0x10, address) {
+            (0x00, 0x0000..=0x1fff) => character_ram[(address as usize) + ((self.character_bank_0_register as usize & 0x1e) * 0x1000)],
+            (0x10, 0x0000..=0x0fff) => character_ram[(address & 0x0fff) as usize + (self.character_bank_0_register as usize * 0x1000)],
+            (0x10, 0x1000..=0x1fff) => character_ram[(address & 0x0fff) as usize + (self.character_bank_1_register as usize * 0x1000)],
+            _ => unreachable!(),
+        };
+    }
+
+    fn program_write(&mut self, program_ram: &mut [u8], address: u16, data: u8) {
+        match address {
+            0x6000..=0x7fff => program_ram[usize::from(address - 0x6000)] = data,
+            0x8000..=0xffff => {
+                if data & 0x80 == 0 {
+                    // Boolean to determine if the load register should be copied into the target register
+                    // after this bit is written.
+                    let copy = self.load_register & 1 > 0;
+                    self.load_register = (self.load_register >> 1) | ((data & 1) << 4);
+                    if copy {
+                        // Set one of the mapper registers based on the target address
+                        match (address & 0x6000) + 0x8000 {
+                            0x8000 => self.control_register = self.load_register,
+                            0xa000 => self.character_bank_0_register = self.load_register,
+                            0xc000 => self.character_bank_1_register = self.load_register,
+                            0xe000 => self.program_bank_register = self.load_register,
+                            _ => unreachable!(),
+                        }
+                        self.load_register = 0x10
+                    }
+                } else {
+                    // Reset the load register when the 7th bit isn't set
+                    self.load_register = 0x10
+                }
+            }
+            _ => warn!("Mapper000::program_write called with invalid address 0x{:4X}", address),
+        }
+    }
+
+    fn character_write(&mut self, character_ram: &mut [u8], address: u16, data: u8) {
+        match (self.control_register & 0x10, address) {
+            (0x00, 0x0000..=0x1fff) => character_ram[(address as usize) + ((self.character_bank_0_register as usize & 0x1e) * 0x1000)] = data,
+            (0x01, 0x0000..=0x0fff) => character_ram[(address & 0x0fff) as usize + (self.character_bank_0_register as usize * 0x1000)] = data,
+            (0x01, 0x1000..=0x1fff) => character_ram[(address & 0x0fff) as usize + (self.character_bank_1_register as usize * 0x1000)] = data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_mirroring(&mut self, _mirroring: Mirroring) -> Mirroring {
+        return match self.control_register & 0b11 {
+            0b00 => Mirroring::OneScreenLower,
+            0b01 => Mirroring::OneScreenUpper,
+            0b10 => Mirroring::Vertical,
+            0b11 => Mirroring::Horizontal,
+            _ => unreachable!(),
+        };
+    }
+}
 
 /// Mapper struct for the UxROM Mappers, which are given the iNES id of 002
 pub(super) struct Mapper002 {

@@ -733,7 +733,12 @@ impl NesPpu {
 
     /// Maps an address to a name table address by applying mirroring.
     fn apply_name_table_mirroring(&mut self, cartridge: &mut Cartridge, address: u16) -> usize {
-        return ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize;
+        return match cartridge.get_mirroring() {
+            Mirroring::OneScreenLower | Mirroring::OneScreenUpper => (address & 0x3ff) as usize,
+            Mirroring::Vertical | Mirroring::Horizontal => {
+                ((address & 0x3ff) | ((address >> (0xa | (cartridge.get_mirroring() == Mirroring::Horizontal) as u16) & 0x1) << 0xa)) as usize
+            }
+        };
     }
 
     /// Mirror palette addresses to show the universal background colour when necessary.
