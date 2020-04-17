@@ -441,20 +441,21 @@ impl NesPpu {
 
     /// Calculates that background pixel and palette based on the shifters
     fn calculate_background_pixel(&mut self) -> (u8, u8) {
-        let mut background_pixel = 0x00;
-        let mut background_palette = 0x00;
-
-        if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE)
+        // Make sure this part of the screen is being rendered
+        return if self.mask_flags.intersects(PpuMask::BACKGROUND_ENABLE)
             && (!(self.cycle > 0 && self.cycle <= 8) || self.mask_flags.intersects(PpuMask::BACKGROUND_LEFT_ENABLE))
         {
-            background_pixel = ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
-                | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
-
-            background_palette = ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
-                | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8;
-        }
-
-        return (background_pixel, background_palette);
+            (
+                // Calculate the background pixel
+                ((((self.pattern_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
+                    | (((self.pattern_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8,
+                // Calculate the background palette
+                ((((self.attribute_shifter_hi << self.fine_x_scroll) & 0x8000) >> 14)
+                    | (((self.attribute_shifter_lo << self.fine_x_scroll) & 0x8000) >> 15)) as u8,
+            )
+        } else {
+            (0x00, 0x00)
+        };
     }
 
     /// Calculates that foreground pixel and palette based on the shifters and x positions.
@@ -802,7 +803,7 @@ impl NesPpu {
     pub(super) fn reset(&mut self) {
         self.ctrl_flags = Default::default();
         self.mask_flags = Default::default();
-        self.status_flags = self.status_flags & PpuStatus::VERTICAL_BLANK;
+        self.status_flags &= PpuStatus::VERTICAL_BLANK;
         self.write_latch = false;
         self.read_buffer = 0x00;
         self.cycle = 0;

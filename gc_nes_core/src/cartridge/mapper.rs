@@ -59,7 +59,6 @@ pub(super) trait Mapper {
                     program_rom[usize::from(address - 0x8000) % program_rom.len()]
                 }
             }
-            _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
         }
     }
 
@@ -118,7 +117,7 @@ impl Mapper for Mapper001 {
                 return 0x00;
             }
             0x6000..=0x7fff => {
-                if self.program_bank_register & 0x10 > 0 && program_ram.len() == 0 {
+                if self.program_bank_register & 0x10 > 0 && program_ram.is_empty() {
                     0x00
                 } else {
                     program_ram[usize::from(address - 0x6000) % program_ram.len()]
@@ -135,7 +134,6 @@ impl Mapper for Mapper001 {
                 }
                 _ => unreachable!(),
             },
-            _ => panic!("Mapper000::program_read called with invalid address 0x{:4X}", address),
         }
     }
 

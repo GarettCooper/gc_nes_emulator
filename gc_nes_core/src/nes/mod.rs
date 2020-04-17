@@ -207,11 +207,11 @@ impl Interface6502 for Bus {
         match address {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff], // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.read(&mut self.cartridge, address), // Mirroring will be done by the ppu
-            0x4000..=0x4015 => 0x00,                                    // self.apu.read(address)
-            0x4016 => self.input_device_one.poll(0x00),                 // Read one bit from the first controller TODO: Open Bus Behaviour
-            0x4017 => self.input_device_two.poll(0x00),                 // Read one bit from the second controller
-            0x4018..=0x401f => 0x00,                                    // Usually disabled on the nes TODO: Decide how to handle these
-            0x4020..=0xffff => self.cartridge.program_read(address),    // Addresses above 0x4020 read from the cartridge
+            0x4000..=0x4015 => self.apu.read(address),
+            0x4016 => self.input_device_one.poll(0x00), // Read one bit from the first controller TODO: Open Bus Behaviour
+            0x4017 => self.input_device_two.poll(0x00), // Read one bit from the second controller
+            0x4018..=0x401f => 0x00,                    // Usually disabled on the nes TODO: Decide how to handle these
+            0x4020..=0xffff => self.cartridge.program_read(address), // Addresses above 0x4020 read from the cartridge
         }
     }
 
@@ -219,15 +219,16 @@ impl Interface6502 for Bus {
         match address {
             0x0000..=0x1fff => self.ram[usize::from(address) & 0x07ff] = data, // Addresses 0x0800-0x1fff mirror the 2KiB of ram
             0x2000..=0x3fff => self.ppu.write(&mut self.cartridge, address, data), // Mirroring will be done by the ppu
-            0x4000..=0x4013 => warn!("APU Write Unimplemented"),               // self.apu.write(address, data)
-            0x4014 => self.dma_status = Some(DmaStatus::new(data)),            // Begins the OAM DMA operation at the data page
-            0x4015 => warn!("APU Write Unimplemented"),
+            0x4000..=0x4013 => self.apu.write(address, data),
+            0x4014 => self.dma_status = Some(DmaStatus::new(data)), // Begins the OAM DMA operation at the data page
+            0x4015 => self.apu.write(address, data),                // Write to the APU's sound channel register
             0x4016 => {
-                self.input_device_one.latch(data); // Set the shift register reload latch on the both controllers
+                // Set the shift register reload latch on the both controllers
+                self.input_device_one.latch(data);
                 self.input_device_two.latch(data);
             }
-            0x4017 => warn!("APU Write Unimplemented"), // Writing to the second controller address is undefined
-            0x4018..=0x401f => unimplemented!(),        // Usually disabled on the nes
+            0x4017 => self.apu.write(address, data), // Writing to the second controller address is the APU frame counter control
+            0x4018..=0x401f => warn!("Write to disabled address 0x{:04X}", address), // Usually disabled on the nes
             0x4020..=0xffff => self.cartridge.program_write(address, data), // Addresses above 0x4020 write to the cartridge
         }
     }

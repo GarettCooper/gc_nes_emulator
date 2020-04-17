@@ -12,4 +12,10 @@ impl NesApu {
     pub fn new() -> Self {
         NesApu {}
     }
+
+    pub fn read(&mut self, _address: u16) -> u8 {
+        return 0x00;
+    }
+
+    pub fn write(&mut self, _address: u16, _data: u8) {}
 }

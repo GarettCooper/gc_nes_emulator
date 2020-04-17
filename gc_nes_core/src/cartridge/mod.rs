@@ -133,7 +133,11 @@ impl Cartridge {
             }
 
             buf_reader.read_exact(cartridge.program_rom.as_mut())?;
-            buf_reader.read(cartridge.character_ram.as_mut())?;
+            // Lots of .nes files don't use the exact amount of character memory,
+            // and don't have trailing zeroes until the file reaches the appropriate
+            // length, so using read_exact here would have a risk of crashing.
+            // The length is assigned to a discard to please clippy.
+            let _ = buf_reader.read(cartridge.character_ram.as_mut())?;
 
             info!("File loaded successfully");
             return Ok(cartridge);
