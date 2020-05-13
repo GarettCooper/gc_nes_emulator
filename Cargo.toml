@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "gc_nes_core",
-    "gc_nes_desktop"
+    "gc_nes_desktop",
+    "gc_nes_web"
 ]

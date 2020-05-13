@@ -1,6 +1,8 @@
 /target
 **/*.rs.bk
 Cargo.lock
+/bin
+/pkg
 
 .idea/**/workspace.xml
 .idea/**/tasks.xml

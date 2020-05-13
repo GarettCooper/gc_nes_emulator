@@ -72,10 +72,9 @@ impl Cartridge {
     }
 
     /// Loads a cartridge from a reader and returns
-    pub fn load_from_reader<T: Read>(buf_reader: &mut T) -> Result<Cartridge, Box<dyn Error>> {
-        //let mut buf_reader = game_file;
+    pub fn load_from_reader<T: Read>(mut reader: T) -> Result<Cartridge, Box<dyn Error>> {
         let mut header: [u8; 16] = [0; 16];
-        buf_reader.read_exact(&mut header)?;
+        reader.read_exact(&mut header)?;
 
         // Test file format
         if header[..IDENTIFICATION_STRING.len()] == IDENTIFICATION_STRING {
@@ -129,15 +128,15 @@ impl Cartridge {
 
             if HeaderFlags6::from_bits_truncate(header[6]).contains(HeaderFlags6::TRAINER_PRESENT) {
                 debug!("Trainer is present");
-                buf_reader.read_exact(cartridge.trainer_data.as_mut())?;
+                reader.read_exact(cartridge.trainer_data.as_mut())?;
             }
 
-            buf_reader.read_exact(cartridge.program_rom.as_mut())?;
+            reader.read_exact(cartridge.program_rom.as_mut())?;
             // Lots of .nes files don't use the exact amount of character memory,
             // and don't have trailing zeroes until the file reaches the appropriate
             // length, so using read_exact here would have a risk of crashing.
             // The length is assigned to a discard to please clippy.
-            let _ = buf_reader.read(cartridge.character_ram.as_mut())?;
+            let _ = reader.read(cartridge.character_ram.as_mut())?;
 
             info!("File loaded successfully");
             return Ok(cartridge);
