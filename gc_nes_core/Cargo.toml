@@ -10,7 +10,6 @@ keywords = ["emulator", "games", "nes"]
 categories = ["emulators"]
 license = "MIT"
 
-
 [dependencies]
 log = "0.4.8"
 emulator_6502 = "1.0.0"

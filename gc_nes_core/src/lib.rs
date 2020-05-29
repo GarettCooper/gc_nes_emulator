@@ -3,6 +3,13 @@
 //! rendered image data. Audio is currently unsupported.
 //!
 //! ### Using the Emulator
+//!
+//! Add gc_nes_core as a dependency in Cargo.toml
+//! ```toml
+//! [dependencies]
+//! gc_nes_core = "0.1.0"
+//! ```
+//! Dependent crates can use the emulator functionality as follows:
 //! ```rust, ignore
 //! use gc_nes_core::cartridge::Cartridge;
 //! use gc_nes_core::nes::Nes;
@@ -21,6 +28,7 @@
 //! nes.update_controller_two(None); // Disconnected controller
 //!
 //! ```
+//!
 
 #![allow(clippy::needless_return)] // I prefer clarity of return
 #![allow(clippy::verbose_bit_mask)] // For consistency in bit mask usage
