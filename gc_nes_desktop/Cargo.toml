@@ -12,7 +12,7 @@ license = "MIT"
 
 [dependencies]
 gc_nes_core = { path = "../gc_nes_core", version = "0.1.0" }
-log = "*"
+log = "0.4.8"
 env_logger = "0.7.0"
 minifb = "0.13.0"
 structopt = "0.3" # Replace with clap when 3.0.0 comes out of beta
