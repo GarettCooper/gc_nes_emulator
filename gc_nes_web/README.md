@@ -1,4 +1,4 @@
-[![NPM](https://img.shields.io/crates/v/gc_nes_web)](https://www.npmjs.com/package/gc_nes_web)
+[![NPM](https://img.shields.io/npm/v/gc_nes_web)](https://www.npmjs.com/package/gc_nes_web)
 
 # gc_nes_web
 
@@ -32,5 +32,9 @@ mainCanvasContext.drawImage(offscreenCanvas, 0, 0);
 ```
 
 Through wasm-pack, gc_nes_web has full Typescript support
+
+#### Try it Now
+
+You can try out gc_nes_emulator on my website, at https://garettcooper.com/#/nes-emulator
 
 Current version: 0.1.0

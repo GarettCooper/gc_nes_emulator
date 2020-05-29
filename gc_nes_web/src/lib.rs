@@ -28,6 +28,10 @@
 //! ```
 //!
 //! Through wasm-pack, gc_nes_web has full Typescript support
+//!
+//! ### Try it Now
+//!
+//! You can try out gc_nes_emulator on my website, at https://garettcooper.com/#/nes-emulator
 
 mod utils;
 
