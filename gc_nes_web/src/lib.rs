@@ -27,7 +27,7 @@
 //! mainCanvasContext.drawImage(offscreenCanvas, 0, 0);
 //! ```
 //!
-//! Through wasm-pack, gc_nes_web has full Typescript support
+//! Through [wasm-pack](https://github.com/rustwasm/wasm-pack), gc_nes_web has full Typescript support
 //!
 //! ### Try it Now
 //!

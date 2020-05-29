@@ -31,10 +31,10 @@ offscreenCanvasContext.putImageData(imageData, 0, 0);
 mainCanvasContext.drawImage(offscreenCanvas, 0, 0);
 ```
 
-Through wasm-pack, gc_nes_web has full Typescript support
+Through [wasm-pack](https://github.com/rustwasm/wasm-pack), gc_nes_web has full Typescript support
 
 #### Try it Now
 
 You can try out gc_nes_emulator on my website, at https://garettcooper.com/#/nes-emulator
 
-Current version: 0.1.0
+Current version: 0.1.2
