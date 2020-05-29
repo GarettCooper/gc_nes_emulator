@@ -9,6 +9,7 @@ readme = "README.md"
 keywords = ["emulator", "games", "nes"]
 categories = ["emulators"]
 license = "MIT"
+exclude = ["pkg"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
