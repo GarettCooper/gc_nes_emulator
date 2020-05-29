@@ -18,7 +18,7 @@ path = "src/lib.rs"
 default = ["console_error_panic_hook"]
 
 [dependencies]
-gc_nes_core = { path = "../gc_nes_core", version = "0.1.0" }
+gc_nes_core = { path = "../gc_nes_core", version = "0.1.0", features = ["web-frame-format"]}
 wasm-bindgen = "0.2"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by

@@ -57,8 +57,13 @@ pub(super) struct NesPpu {
     /// Secondary object attribute memory stores sprite information for up to 8 sprites on the
     /// scanline that is currently being rendered.
     secondary_object_attribute_memory: [u8; 0x20],
-    /// The current state of the screen
+    /// The current state of the screen as an array of 32 bit colour values for minifb rendering
+    #[cfg(not(feature = "web-frame-format"))]
     screen_buffer: Box<[u32; super::NES_SCREEN_DIMENSIONS]>,
+    /// The current state of the screen as an array of bytes, where each pixel is represented by a set of
+    /// four bytes in RGBA order for web rendering.
+    #[cfg(feature = "web-frame-format")]
+    screen_buffer: Box<[u8; super::NES_SCREEN_DIMENSIONS * 4]>,
     /// The scanline (0 to 261) of the screen that is currently being drawn
     scanline: u16,
     /// The cycle (0 to 340) of the current scanline
@@ -104,6 +109,18 @@ pub(super) struct NesPpu {
     sprite_x_offsets: [i16; 8],
 }
 
+#[cfg(not(feature = "web-frame-format"))]
+/// Create a new screen buffer, extracted to a function for conditional compilation
+fn new_screen_buffer() -> Box<[u32; super::NES_SCREEN_DIMENSIONS]> {
+    return Box::new([0; super::NES_SCREEN_DIMENSIONS]);
+}
+
+#[cfg(feature = "web-frame-format")]
+/// Create a new screen buffer, extracted to a function for conditional compilation
+fn new_screen_buffer() -> Box<[u8; super::NES_SCREEN_DIMENSIONS * 4]> {
+    return Box::new([0; super::NES_SCREEN_DIMENSIONS * 4]);
+}
+
 impl NesPpu {
     /// Create a new instance of a NesPpu
     pub fn new() -> Self {
@@ -121,7 +138,7 @@ impl NesPpu {
             name_table: Box::new([0; 0x800]),
             object_attribute_memory: Box::new([0xff; u8::max_value() as usize + 1]),
             secondary_object_attribute_memory: [0; 0x20],
-            screen_buffer: Box::new([0; super::NES_SCREEN_DIMENSIONS]),
+            screen_buffer: new_screen_buffer(),
             scanline: 261,
             cycle: 0,
             frame_count: 0,
@@ -435,8 +452,23 @@ impl NesPpu {
             background_palette,
             foreground_priority,
         );
-        self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] =
-            NES_COLOUR_MAP[self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize]
+
+        let colour_index = self.vram_read(0x3f00 | ((palette as u16) << 2) | pixel as u16, cartridge) as usize;
+        self.draw_pixel_to_screen_buffer(colour_index);
+    }
+
+    #[cfg(not(feature = "web-frame-format"))]
+    /// Draw pixel to screen buffer, separated from draw_pixel for conditional compilation
+    fn draw_pixel_to_screen_buffer(&mut self, colour_index: usize) {
+        self.screen_buffer[((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize] = NES_COLOUR_MAP[colour_index]
+    }
+
+    #[cfg(feature = "web-frame-format")]
+    /// Draw pixel to screen buffer, separated from draw_pixel for conditional compilation
+    fn draw_pixel_to_screen_buffer(&mut self, colour_index: usize) {
+        let screen_buffer_index = 4 * ((self.cycle - 1) as usize + (self.scanline as usize * 256)) as usize;
+        // TODO: Consider unsafe block here to skip length check
+        self.screen_buffer[screen_buffer_index..screen_buffer_index + 4].copy_from_slice(&NES_COLOUR_MAP_WEB[colour_index]);
     }
 
     /// Calculates that background pixel and palette based on the shifters
@@ -732,8 +764,15 @@ impl NesPpu {
         }
     }
 
-    /// Gets the screen buffer from the PPU.
+    /// Gets the screen buffer from the PPU as an array of 32 bit colour values.
+    #[cfg(not(feature = "web-frame-format"))]
     pub(super) fn get_screen(&mut self) -> &[u32; super::NES_SCREEN_DIMENSIONS] {
+        return &self.screen_buffer;
+    }
+
+    /// Gets the screen buffer from the PPU in web format where each pixel is four bytes in RGBA order for web rendering.
+    #[cfg(feature = "web-frame-format")]
+    pub(super) fn get_screen(&mut self) -> &[u8; super::NES_SCREEN_DIMENSIONS * 4] {
         return &self.screen_buffer;
     }
 
@@ -871,6 +910,7 @@ impl Default for PpuStatus {
 }
 
 #[allow(clippy::unreadable_literal)] // Allow standard 6 character colour hex codes
+#[cfg(not(feature = "web-frame-format"))]
 const NES_COLOUR_MAP: [u32; 0x40] = [
     0x464646, 0x00065a, 0x000678, 0x020673, 0x35034c, 0x57000e, 0x5a0000, 0x410000, 0x120200, 0x001400, 0x001e00, 0x001e00, 0x001521, 0x000000,
     0x000000, 0x000000, 0x9d9d9d, 0x004ab9, 0x0530e1, 0x5718da, 0x9f07a7, 0xcc0255, 0xcf0b00, 0xa42300, 0x5c3f00, 0x0b5800, 0x006600, 0x006713,
@@ -879,11 +919,78 @@ const NES_COLOUR_MAP: [u32; 0x40] = [
     0xe7d58b, 0xc5df8e, 0xa6e6a3, 0x94e8c5, 0x92e4eb, 0xa7a7a7, 0x000000, 0x000000,
 ];
 
+#[cfg(feature = "web-frame-format")]
+const NES_COLOUR_MAP_WEB: [[u8; 0x04]; 0x40] = [
+    [0x46, 0x46, 0x46, 0xff],
+    [0x00, 0x06, 0x5a, 0xff],
+    [0x00, 0x06, 0x78, 0xff],
+    [0x02, 0x06, 0x73, 0xff],
+    [0x35, 0x03, 0x4c, 0xff],
+    [0x57, 0x00, 0x0e, 0xff],
+    [0x5a, 0x00, 0x00, 0xff],
+    [0x41, 0x00, 0x00, 0xff],
+    [0x12, 0x02, 0x00, 0xff],
+    [0x00, 0x14, 0x00, 0xff],
+    [0x00, 0x1e, 0x00, 0xff],
+    [0x00, 0x1e, 0x00, 0xff],
+    [0x00, 0x15, 0x21, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x9d, 0x9d, 0x9d, 0xff],
+    [0x00, 0x4a, 0xb9, 0xff],
+    [0x05, 0x30, 0xe1, 0xff],
+    [0x57, 0x18, 0xda, 0xff],
+    [0x9f, 0x07, 0xa7, 0xff],
+    [0xcc, 0x02, 0x55, 0xff],
+    [0xcf, 0x0b, 0x00, 0xff],
+    [0xa4, 0x23, 0x00, 0xff],
+    [0x5c, 0x3f, 0x00, 0xff],
+    [0x0b, 0x58, 0x00, 0xff],
+    [0x00, 0x66, 0x00, 0xff],
+    [0x00, 0x67, 0x13, 0xff],
+    [0x00, 0x5e, 0x6e, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0xfe, 0xff, 0xff, 0xff],
+    [0x1f, 0x9e, 0xff, 0xff],
+    [0x53, 0x76, 0xff, 0xff],
+    [0x98, 0x65, 0xff, 0xff],
+    [0xfc, 0x67, 0xff, 0xff],
+    [0xff, 0x6c, 0xb3, 0xff],
+    [0xff, 0x74, 0x66, 0xff],
+    [0xff, 0x80, 0x14, 0xff],
+    [0xc4, 0x9a, 0x00, 0xff],
+    [0x71, 0xb3, 0x00, 0xff],
+    [0x28, 0xc4, 0x21, 0xff],
+    [0x00, 0xc8, 0x74, 0xff],
+    [0x00, 0xbf, 0xd0, 0xff],
+    [0x2b, 0x2b, 0x2b, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0xfe, 0xff, 0xff, 0xff],
+    [0x9e, 0xd5, 0xff, 0xff],
+    [0xaf, 0xc0, 0xff, 0xff],
+    [0xd0, 0xb8, 0xff, 0xff],
+    [0xfe, 0xbf, 0xff, 0xff],
+    [0xff, 0xc0, 0xe0, 0xff],
+    [0xff, 0xc3, 0xbd, 0xff],
+    [0xff, 0xca, 0x9c, 0xff],
+    [0xe7, 0xd5, 0x8b, 0xff],
+    [0xc5, 0xdf, 0x8e, 0xff],
+    [0xa6, 0xe6, 0xa3, 0xff],
+    [0x94, 0xe8, 0xc5, 0xff],
+    [0x92, 0xe4, 0xeb, 0xff],
+    [0xa7, 0xa7, 0xa7, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+    [0x00, 0x00, 0x00, 0xff],
+];
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::cartridge::test_utils::*;
-    use crate::nes::NES_SCREEN_DIMENSIONS;
     use std::fmt::{Debug, Formatter, Result};
 
     #[test]
@@ -1810,7 +1917,7 @@ mod test {
                 name_table: Box::new([0; 2048]),
                 object_attribute_memory: Box::new([0; 256]),
                 secondary_object_attribute_memory: [0; 32],
-                screen_buffer: Box::new([0; NES_SCREEN_DIMENSIONS]),
+                screen_buffer: new_screen_buffer(),
                 scanline: 0,
                 cycle: 0,
                 frame_count: 0,

@@ -153,12 +153,26 @@ impl Nes {
 
     /// Runs as many cycles as necessary to complete the current frame.
     /// Returns the frame as an of 32 bit colour ARGB colour values.
+    #[cfg(not(feature = "web-frame-format"))]
     pub fn frame(&mut self) -> &[u32; NES_SCREEN_DIMENSIONS] {
+        self.complete_frame();
+        return self.get_screen();
+    }
+
+    /// Runs as many cycles as necessary to complete the current frame.
+    /// Returns the frame as an of 32 bit colour ARGB colour values.
+    #[cfg(feature = "web-frame-format")]
+    pub fn frame(&mut self) -> &[u8; NES_SCREEN_DIMENSIONS * 4] {
+        self.complete_frame();
+        return self.get_screen();
+    }
+
+    /// Runs as many cycles as necessary to complete the current frame.
+    fn complete_frame(&mut self) {
         let current_frame = self.bus.ppu.frame_count;
         while self.bus.ppu.frame_count == current_frame {
             self.cycle();
         }
-        return self.get_screen();
     }
 
     /// Updates the state of the input device connected to the first port
@@ -181,8 +195,15 @@ impl Nes {
         }
     }
 
-    /// Gets the current state of the screen from the PPU's screen buffer
+    /// Gets the current state of the screen from the PPU's screen buffer as an array of 32 bit colour values.
+    #[cfg(not(feature = "web-frame-format"))]
     pub fn get_screen(&mut self) -> &[u32; NES_SCREEN_DIMENSIONS] {
+        self.bus.ppu.get_screen()
+    }
+
+    /// Gets the current state of the screen from the PPU's screen buffer in web format where each pixel is four bytes in RGBA order for web rendering.
+    #[cfg(feature = "web-frame-format")]
+    pub fn get_screen(&mut self) -> &[u8; NES_SCREEN_DIMENSIONS * 4] {
         self.bus.ppu.get_screen()
     }
 

@@ -60,14 +60,14 @@ impl WebNes {
     /// Returns the frame as a Vector of bytes, with each pixel of the
     /// NES screen represented by four bytes in RGBA order.
     pub fn frame(&mut self) -> Vec<u8> {
-        Self::convert_frame_format(self.nes.frame())
+        self.nes.frame().to_vec()
     }
 
     /// Gets the current state of the screen from the PPU's screen buffer.
     /// Returns the frame as a Vector of bytes, with each pixel of the
     /// NES screen represented by four bytes in RGBA order.
     pub fn get_screen(&mut self) -> Vec<u8> {
-        Self::convert_frame_format(self.nes.get_screen())
+        self.nes.get_screen().to_vec()
     }
 
     /// Updates the state of the input device connected to the first port.
@@ -83,15 +83,6 @@ impl WebNes {
     /// Resets the state of the NES.
     pub fn reset(&mut self) {
         self.nes.reset();
-    }
-
-    /// Internal function for converting a frame from 32bit ARGB values to
-    /// Four bytes in RGBA order.
-    fn convert_frame_format(frame: &[u32; gc_nes_core::nes::NES_SCREEN_DIMENSIONS]) -> Vec<u8> {
-        frame
-            .iter()
-            .flat_map(|argb| [(argb >> 16) as u8, (argb >> 8) as u8, *argb as u8, u8::MAX].to_vec())
-            .collect()
     }
 }
 
