@@ -3,6 +3,9 @@
 //! to load and run NES ROMs, provide input, and extract rendered image data.
 //! Audio is currently unsupported.
 //!
+//! ### Install in an NPM Project
+//! `npm install gc_nes_web`
+//!
 //! ### Using the NES Emulator with Javascript
 //! ```javascript
 //! // Import the package
@@ -23,6 +26,8 @@
 //! // mainCanvasContext is the 2D context for the Canvas you actually want to draw to.
 //! mainCanvasContext.drawImage(offscreenCanvas, 0, 0);
 //! ```
+//!
+//! Through wasm-pack, gc_nes_web has full Typescript support
 
 mod utils;
 
