@@ -15,7 +15,7 @@ Add gc_nes_core as a dependency in Cargo.toml
 gc_nes_core = "0.1.0"
 ```
 Dependent crates can use the emulator functionality as follows:
-```rust, ignore
+```rust
 use gc_nes_core::cartridge::Cartridge;
 use gc_nes_core::nes::Nes;
 

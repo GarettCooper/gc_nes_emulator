@@ -37,4 +37,4 @@ Through [wasm-pack](https://github.com/rustwasm/wasm-pack), gc_nes_web has full 
 
 You can try out gc_nes_emulator on my website, at https://garettcooper.com/#/nes-emulator
 
-Current version: 0.1.2
+Current version: 0.1.5
