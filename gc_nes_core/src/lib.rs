@@ -10,7 +10,7 @@
 //! gc_nes_core = "0.1.0"
 //! ```
 //! Dependent crates can use the emulator functionality as follows:
-//! ```rust, ignore
+//! ```ignore
 //! use gc_nes_core::cartridge::Cartridge;
 //! use gc_nes_core::nes::Nes;
 //!
